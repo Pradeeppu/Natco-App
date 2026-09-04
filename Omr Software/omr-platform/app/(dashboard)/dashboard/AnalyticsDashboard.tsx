@@ -48,13 +48,21 @@ export default function AnalyticsDashboard() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      {/* Section Header */}
-      <div>
-        <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'hsl(171 42% 32%)', marginBottom: '0.5rem' }}>
-          📊 Advanced Analytics
+      {/* NSF Hero Section */}
+      <div style={{
+        background: 'linear-gradient(135deg, #09203f 0%, #134074 50%, #003366 100%)',
+        color: 'white',
+        padding: '2rem 2.25rem',
+        borderRadius: '1rem',
+        border: '1px solid rgba(255, 255, 255, 0.12)',
+        boxShadow: '0 10px 25px -5px rgba(9, 32, 63, 0.35)',
+        marginBottom: '0.5rem',
+      }}>
+        <h2 style={{ fontSize: '1.75rem', fontWeight: 800, marginBottom: '0.5rem', letterSpacing: '-0.02em' }}>
+          📊 Advanced Analytics Dashboard
         </h2>
-        <p style={{ fontSize: '0.9rem', color: 'hsl(215 13% 27%)', maxWidth: '600px' }}>
-          Comprehensive performance analysis across schools, grades, and subjects. Use these insights to identify trends and optimize educational outcomes.
+        <p style={{ fontSize: '0.95rem', opacity: 0.95, maxWidth: '700px' }}>
+          NorthSouth Foundation Assessment Platform — Comprehensive performance analysis across schools, grades, and subjects. Use these insights to identify trends and optimize educational outcomes.
         </p>
       </div>
 
@@ -191,27 +199,33 @@ export default function AnalyticsDashboard() {
         </div>
       </div>
 
-      {/* Insights Section */}
-      <div style={{ background: 'hsl(159 41% 96%)', border: '1px solid hsl(159 39% 72%)', borderRadius: '0.75rem', padding: '1.5rem' }}>
-        <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1rem', color: 'hsl(171 42% 32%)' }}>
-          📌 Key Insights
+      {/* NSF Insights Section */}
+      <div style={{
+        background: 'linear-gradient(135deg, hsl(164 41% 96%) 0%, hsl(164 40% 94%) 100%)',
+        border: '2px solid hsl(164 39% 72%)',
+        borderRadius: '0.875rem',
+        padding: '1.75rem',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+      }}>
+        <h3 style={{ fontSize: '1.125rem', fontWeight: 700, marginBottom: '1.25rem', color: 'hsl(164 42% 32%)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          📌 Key Insights & Recommendations
         </h3>
-        <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', listStyle: 'none' }}>
-          <li style={{ fontSize: '0.875rem', color: 'hsl(217 33% 17%)', display: 'flex', gap: '0.75rem' }}>
-            <span style={{ color: 'hsl(160 84% 35%)', fontWeight: 700 }}>✓</span>
-            Performance has improved by 3.2 points over the past 6 months
+        <ul style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem', listStyle: 'none' }}>
+          <li style={{ fontSize: '0.9rem', color: 'hsl(217 33% 17%)', display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+            <span style={{ color: 'hsl(160 84% 35%)', fontWeight: 800, fontSize: '1.125rem', marginTop: '-2px' }}>✓</span>
+            <span><strong>Performance Growth:</strong> Performance has improved by 3.2 points over the past 6 months, showing consistent upward trend</span>
           </li>
-          <li style={{ fontSize: '0.875rem', color: 'hsl(217 33% 17%)', display: 'flex', gap: '0.75rem' }}>
-            <span style={{ color: 'hsl(160 84% 35%)', fontWeight: 700 }}>✓</span>
-            Mathematics shows the highest average score at 82%, followed by Social Studies at 80%
+          <li style={{ fontSize: '0.9rem', color: 'hsl(217 33% 17%)', display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+            <span style={{ color: 'hsl(160 84% 35%)', fontWeight: 800, fontSize: '1.125rem', marginTop: '-2px' }}>✓</span>
+            <span><strong>Subject Excellence:</strong> Mathematics leads at 82%, followed by Social Studies at 80%. Science requires focused improvement (75%)</span>
           </li>
-          <li style={{ fontSize: '0.875rem', color: 'hsl(217 33% 17%)', display: 'flex', gap: '0.75rem' }}>
-            <span style={{ color: 'hsl(160 84% 35%)', fontWeight: 700 }}>✓</span>
-            28% of students are in the "Excellent" range (90-100%), indicating strong overall performance
+          <li style={{ fontSize: '0.9rem', color: 'hsl(217 33% 17%)', display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+            <span style={{ color: 'hsl(160 84% 35%)', fontWeight: 800, fontSize: '1.125rem', marginTop: '-2px' }}>✓</span>
+            <span><strong>Grade Distribution:</strong> 28% of students achieving "Excellent" (90-100%) indicates strong overall performance across institutions</span>
           </li>
-          <li style={{ fontSize: '0.875rem', color: 'hsl(217 33% 17%)', display: 'flex', gap: '0.75rem' }}>
-            <span style={{ color: 'hsl(160 84% 35%)', fontWeight: 700 }}>✓</span>
-            Assessment completion rate has increased to 64% in Week 4, up from 45% in Week 1
+          <li style={{ fontSize: '0.9rem', color: 'hsl(217 33% 17%)', display: 'flex', gap: '0.75rem', alignItems: 'flex-start' }}>
+            <span style={{ color: 'hsl(160 84% 35%)', fontWeight: 800, fontSize: '1.125rem', marginTop: '-2px' }}>✓</span>
+            <span><strong>Assessment Progress:</strong> Completion rate surged to 64% in Week 4 (from 45% Week 1), demonstrating improved engagement and workflow efficiency</span>
           </li>
         </ul>
       </div>
@@ -220,7 +234,7 @@ export default function AnalyticsDashboard() {
 }
 
 /**
- * Metric Card Component
+ * NSF-Branded Metric Card Component
  */
 function MetricCard({
   label,
@@ -238,38 +252,42 @@ function MetricCard({
   return (
     <div style={{
       background: 'white',
-      border: `1px solid hsl(220 13% 91%)`,
-      borderRadius: '0.75rem',
-      padding: '1.5rem',
+      border: `2px solid ${color}20`,
+      borderRadius: '0.875rem',
+      padding: '1.75rem',
       boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-      transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+      transition: 'transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease',
+      background: `linear-gradient(135deg, ${color}08 0%, ${color}04 100%)`,
     }}
     onMouseEnter={(e) => {
-      e.currentTarget.style.transform = 'translateY(-2px)'
-      e.currentTarget.style.boxShadow = '0 8px 16px rgba(0,0,0,0.12)'
+      e.currentTarget.style.transform = 'translateY(-4px)'
+      e.currentTarget.style.boxShadow = '0 8px 20px rgba(0,0,0,0.12)'
+      e.currentTarget.style.borderColor = `${color}40`
     }}
     onMouseLeave={(e) => {
       e.currentTarget.style.transform = 'translateY(0)'
       e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'
+      e.currentTarget.style.borderColor = `${color}20`
     }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
-        <div style={{ fontSize: '2rem' }}>{icon}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.25rem' }}>
+        <div style={{ fontSize: '2.25rem' }}>{icon}</div>
         <span style={{
-          background: `${color}15`,
+          background: `${color}20`,
           color: color,
-          padding: '0.25rem 0.75rem',
+          padding: '0.35rem 0.875rem',
           borderRadius: '9999px',
           fontSize: '0.75rem',
-          fontWeight: 600,
+          fontWeight: 700,
+          border: `1px solid ${color}40`,
         }}>
           {change}
         </span>
       </div>
-      <div style={{ fontSize: '0.875rem', color: 'hsl(215 13% 27%)', marginBottom: '0.5rem' }}>
+      <div style={{ fontSize: '0.8125rem', color: 'hsl(215 13% 27%)', marginBottom: '0.625rem', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>
         {label}
       </div>
-      <div style={{ fontSize: '1.875rem', fontWeight: 700, color: 'hsl(217 33% 17%)' }}>
+      <div style={{ fontSize: '2rem', fontWeight: 800, color: color }}>
         {value}
       </div>
     </div>

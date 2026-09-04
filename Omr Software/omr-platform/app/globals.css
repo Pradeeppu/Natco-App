@@ -4,23 +4,31 @@
 
 :root {
   /* ═══════════════════════════════════════════════════════════════════════════
-     MODERN TEAL PALETTE - Professional Educational Assessment Design System
+     NORTHSOUTH FOUNDATION BRAND PALETTE
+     Professional Educational Assessment Design System
      ═══════════════════════════════════════════════════════════════════════════ */
 
-  /* PRIMARY COLORS: Deep Teal (#1e5a5a) - Trust, Education, Stability */
-  --primary-50: 159 41% 96%;    /* #f0f8f8 - Lightest */
-  --primary-100: 159 44% 92%;   /* #e0f2f1 */
-  --primary-200: 159 42% 82%;   /* #b2dfdb */
-  --primary-300: 159 39% 72%;   /* #80cbc4 */
-  --primary-400: 159 36% 62%;   /* #4db6ac */
-  --primary-500: 159 34% 52%;   /* #26a69a */
-  --primary-600: 169 43% 36%;   /* #1e7e74 */
-  --primary-700: 171 42% 32%;   /* #1b5e56 - Main Brand Color */
-  --primary-800: 172 41% 27%;   /* #164b46 */
-  --primary-900: 174 40% 22%;   /* #0d3a35 - Darkest */
+  /* PRIMARY COLORS: NSF Deep Teal (#1e5a5a) - Trust, Education, Stability */
+  /* Aligned with NorthSouth Foundation Brand Identity */
+  --primary-50: 164 41% 96%;    /* #f0f8f8 - Lightest */
+  --primary-100: 164 44% 92%;   /* #e0f2f1 */
+  --primary-200: 164 42% 82%;   /* #b2dfdb */
+  --primary-300: 164 39% 72%;   /* #80cbc4 */
+  --primary-400: 164 36% 62%;   /* #4db6ac */
+  --primary-500: 164 34% 52%;   /* #26a69a */
+  --primary-600: 164 43% 36%;   /* #1e7e74 - NSF Sidebar Teal */
+  --primary-700: 164 42% 32%;   /* #1b5e56 - NSF Main Brand Teal */
+  --primary-800: 164 41% 27%;   /* #164b46 */
+  --primary-900: 164 40% 22%;   /* #0d3a35 - Darkest */
 
-  --primary: 171 42% 32%;       /* #1b5e56 */
+  --primary: 164 42% 32%;       /* #1b5e56 - NSF Brand Color */
   --primary-foreground: 0 0% 100%;
+
+  /* NSF NAVY-OCEAN GRADIENT (Hero Banners) */
+  --nsf-navy-dark: 217 49% 15%;   /* #09203f */
+  --nsf-navy-mid: 215 45% 27%;    /* #134074 */
+  --nsf-navy-light: 213 100% 20%; /* #003366 */
+  --nsf-gradient: linear-gradient(135deg, #09203f 0%, #134074 50%, #003366 100%);
 
   /* SECONDARY COLORS: Gold Accent (#f59e0b) - Engagement, Highlights, CTAs */
   --secondary-50: 42 100% 97%;   /* #fffbf0 - Lightest */
@@ -217,12 +225,13 @@ body {
 .sidebar {
   width: var(--sidebar-width);
   flex-shrink: 0;
-  background: hsl(164 45% 11%); /* NorthSouth Deep Teal */
+  background: hsl(var(--primary-700)); /* ✓ NSF Deep Teal - Brand Color */
   color: hsl(164 20% 85%);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
   overflow-x: hidden;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.08);
 }
 
 .sidebar-logo {
@@ -653,7 +662,7 @@ body {
 /* ─── NORTHSOUTH FOUNDATION DASHBOARD COMPONENTS ──────────────────────────── */
 
 .hero-banner {
-  background: linear-gradient(135deg, #09203f 0%, #134074 50%, #003366 100%); /* NSF Signature Navy-Ocean */
+  background: var(--nsf-gradient); /* ✓ NSF Signature Navy-Ocean Gradient */
   color: #ffffff;
   padding: 1.5rem 1.75rem;
   border-radius: 1rem;
@@ -716,6 +725,8 @@ body {
   box-shadow: 0 8px 20px -4px rgba(11, 37, 69, 0.12);
 }
 
+/* ✓ NSF BRANDED STAT CARDS - Semantic Color Coding */
+
 .stat-card-blue {
   background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
   border-color: #bfdbfe;
@@ -738,6 +749,34 @@ body {
   background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
   border-color: #fed7aa;
   color: #c2410c;
+}
+
+/* NSF PRIMARY TEAL VARIANT */
+.stat-card-teal {
+  background: linear-gradient(135deg, hsl(var(--primary-50)) 0%, hsl(var(--primary-100)) 100%);
+  border-color: hsl(var(--primary-200));
+  color: hsl(var(--primary-700));
+}
+
+/* NSF SUCCESS EMERALD */
+.stat-card-success {
+  background: linear-gradient(135deg, hsl(var(--success-50)) 0%, hsl(var(--success-100)) 100%);
+  border-color: hsl(var(--success-200));
+  color: hsl(var(--success-700));
+}
+
+/* NSF WARNING AMBER */
+.stat-card-warning {
+  background: linear-gradient(135deg, hsl(var(--warning-50)) 0%, hsl(var(--warning-100)) 100%);
+  border-color: hsl(var(--warning-200));
+  color: hsl(var(--warning-700));
+}
+
+/* NSF DANGER RED */
+.stat-card-danger {
+  background: linear-gradient(135deg, hsl(var(--danger-50)) 0%, hsl(var(--danger-100)) 100%);
+  border-color: hsl(var(--danger-200));
+  color: hsl(var(--danger-700));
 }
 
 .stat-header {
