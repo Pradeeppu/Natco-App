@@ -1,0 +1,55 @@
+# Static analysis for the NATCO Assessment App.
+#
+# The rules below are not decoration: several of them exist to protect
+# invariants in docs/01-architecture.md (immutability, no silent failures,
+# explicit types at API boundaries).
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  errors:
+    # Treat these as build breakers, not suggestions.
+    missing_required_param: error
+    missing_return: error
+    invalid_annotation_target: ignore
+    # Swallowing an error is how data goes missing silently.
+    empty_catches: error
+    unawaited_futures: error
+    # Keep the public surface documented where it matters.
+    always_declare_return_types: error
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - "build/**"
+    - android/**
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+
+linter:
+  rules:
+    always_declare_return_types: true
+    avoid_dynamic_calls: true
+    avoid_slow_async_io: true
+    cancel_subscriptions: true
+    close_sinks: true
+    comment_references: false
+    directives_ordering: true
+    exhaustive_cases: true
+    prefer_const_constructors: true
+    prefer_const_declarations: true
+    prefer_final_locals: true
+    # Disabled deliberately. Constructor-injected collaborators are held in
+    # private fields, and Dart has no private *named* parameter, so
+    # `this._logger` is not expressible for the named-argument constructors
+    # this codebase uses throughout. The lint's suggestion cannot be applied.
+    prefer_initializing_formals: false
+    prefer_single_quotes: true
+    require_trailing_commas: true
+    sort_constructors_first: true
+    throw_in_finally: true
+    unawaited_futures: true
+    unnecessary_lambdas: true
+    unnecessary_parenthesis: true
+    use_enums: true
+    use_super_parameters: true
