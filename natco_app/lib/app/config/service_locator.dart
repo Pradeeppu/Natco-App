@@ -23,6 +23,7 @@ import 'package:natco_app/core/services/device_info_service.dart';
 import 'package:natco_app/core/services/logger.dart';
 import 'package:natco_app/core/utils/clock.dart';
 import 'package:natco_app/core/utils/id_generator.dart';
+import 'package:natco_app/data/local/demo_master_data.dart';
 import 'package:natco_app/features/auth/data/repository/auth_repository_impl.dart';
 import 'package:natco_app/features/auth/data/service/auth_service.dart';
 import 'package:natco_app/features/auth/data/service/firebase_auth_service.dart';
@@ -31,6 +32,12 @@ import 'package:natco_app/features/auth/data/store/session_store.dart';
 import 'package:natco_app/features/auth/domain/repository/auth_repository.dart';
 import 'package:natco_app/features/auth/presentation/controller/session_controller.dart';
 import 'package:natco_app/features/auth/presentation/controller/session_state.dart';
+import 'package:natco_app/features/schools/data/repository/firestore_schools_repository.dart';
+import 'package:natco_app/features/schools/data/repository/in_memory_schools_repository.dart';
+import 'package:natco_app/features/schools/domain/repository/schools_repository.dart';
+import 'package:natco_app/features/students/data/repository/firestore_students_repository.dart';
+import 'package:natco_app/features/students/data/repository/in_memory_students_repository.dart';
+import 'package:natco_app/features/students/domain/repository/students_repository.dart';
 
 /// The resolved configuration.
 ///
@@ -170,6 +177,66 @@ final Provider<AuthRepository> authRepositoryProvider =
 /// The session, owned for the lifetime of the app.
 final NotifierProvider<SessionController, SessionState> sessionProvider =
     NotifierProvider<SessionController, SessionState>(SessionController.new);
+
+/// Bundles the two in-memory master-data repositories so they can share one
+/// underlying dataset.
+///
+/// [InMemoryStudentsRepository] needs [InMemorySchoolsRepository] to resolve
+/// a new student's ancestry (docs/02-data-model.md), and the demo seed
+/// data — one school hierarchy, students enrolled in it — only makes sense
+/// as a single dataset. Two independent providers each constructing their
+/// own repository would seed two unrelated worlds.
+final class _InMemoryMasterData {
+  const _InMemoryMasterData({required this.schools, required this.students});
+
+  final InMemorySchoolsRepository schools;
+  final InMemoryStudentsRepository students;
+}
+
+final Provider<_InMemoryMasterData> _inMemoryMasterDataProvider =
+    Provider<_InMemoryMasterData>((Ref ref) {
+      final IdGenerator idGenerator = ref.watch(idGeneratorProvider);
+      final Clock clock = ref.watch(clockProvider);
+      final InMemorySchoolsRepository schools = InMemorySchoolsRepository(
+        idGenerator: idGenerator,
+        clock: clock,
+      );
+      final InMemoryStudentsRepository students = InMemoryStudentsRepository(
+        idGenerator: idGenerator,
+        clock: clock,
+        schools: schools,
+      );
+      if (ref.watch(appConfigProvider).featureFlags.enableDemoSeedData) {
+        seedDemoMasterData(
+          schools: schools,
+          students: students,
+          idGenerator: idGenerator,
+          clock: clock,
+        );
+      }
+      return _InMemoryMasterData(schools: schools, students: students);
+    });
+
+final Provider<SchoolsRepository> schoolsRepositoryProvider =
+    Provider<SchoolsRepository>((Ref ref) {
+      final AppConfig config = ref.watch(appConfigProvider);
+      if (!config.environment.usesFirebase) {
+        return ref.watch(_inMemoryMasterDataProvider).schools;
+      }
+      return FirestoreSchoolsRepository(firestore: FirebaseFirestore.instance);
+    });
+
+final Provider<StudentsRepository> studentsRepositoryProvider =
+    Provider<StudentsRepository>((Ref ref) {
+      final AppConfig config = ref.watch(appConfigProvider);
+      if (!config.environment.usesFirebase) {
+        return ref.watch(_inMemoryMasterDataProvider).students;
+      }
+      return FirestoreStudentsRepository(
+        firestore: FirebaseFirestore.instance,
+        idGenerator: ref.watch(idGeneratorProvider),
+      );
+    });
 
 /// Emits the current connection status for the offline banner.
 ///

@@ -96,7 +96,9 @@ final List<GuardedRoute> kAppRoutes = <GuardedRoute>[
     path: RoutePaths.schoolDetail,
     rule: const RouteAccessRule.requires(Permission.viewSchools),
     insideShell: true,
-    builder: (_, _) => const SchoolDetailScreen(),
+    builder: (_, GoRouterState state) => SchoolDetailScreen(
+      schoolId: state.pathParameters['schoolId']!,
+    ),
   ),
   GuardedRoute(
     path: RoutePaths.students,
@@ -108,7 +110,9 @@ final List<GuardedRoute> kAppRoutes = <GuardedRoute>[
     path: RoutePaths.studentDetail,
     rule: const RouteAccessRule.requires(Permission.viewStudents),
     insideShell: true,
-    builder: (_, _) => const StudentDetailScreen(),
+    builder: (_, GoRouterState state) => StudentDetailScreen(
+      studentId: state.pathParameters['studentId']!,
+    ),
   ),
   GuardedRoute(
     path: RoutePaths.assessments,
@@ -240,7 +244,13 @@ final Provider<GoRouter> routerProvider = Provider<GoRouter>((Ref ref) {
       return RouteGuard.redirectFor(
         session: session,
         location: state.uri.toString(),
-        rule: ruleForMatchedPath(state.matchedLocation),
+        // `fullPath`, not `matchedLocation`: the latter is the concrete
+        // location with path parameters already substituted
+        // (`/schools/<uuid>`), which never equals a declared template
+        // (`/schools/:schoolId`) and made every parameterized route fail
+        // closed for every role. `fullPath` is the template go_router
+        // actually matched against.
+        rule: ruleForMatchedPath(state.fullPath ?? state.matchedLocation),
         intendedLocation: state.uri.queryParameters[kIntendedLocationParam],
       );
     },

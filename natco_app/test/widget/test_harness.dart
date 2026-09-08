@@ -21,6 +21,7 @@ import 'package:natco_app/features/auth/data/service/in_memory_auth_service.dart
 import 'package:natco_app/features/auth/domain/entity/access_scope.dart';
 import 'package:natco_app/features/auth/domain/entity/app_user.dart';
 import 'package:natco_app/features/auth/domain/entity/user_role.dart';
+import 'package:riverpod/misc.dart' show Override;
 
 /// A demo password shared by the test accounts.
 const String kTestPassword = 'natco1234';
@@ -51,6 +52,7 @@ Future<ProviderContainer> pumpApp(
   List<DemoAccount>? accounts,
   ConnectionStatus connection = ConnectionStatus.onlineUnmetered,
   Size surfaceSize = const Size(400, 900),
+  List<Override> extraOverrides = const <Override>[],
 }) async {
   // Set the physical size *and* pin the device pixel ratio to 1, so
   // `surfaceSize` is the logical size the layout actually sees. Setting the
@@ -84,6 +86,7 @@ Future<ProviderContainer> pumpApp(
           clock: ref.watch(clockProvider),
         ),
       ),
+      ...extraOverrides,
     ],
   );
   addTearDown(container.dispose);
