@@ -1,0 +1,155 @@
+rules_version = '2';
+
+// NATCO Assessment — Cloud Storage security rules.
+//
+// Object paths encode the full ancestry
+// (omr/{year}/{assessment}/{state}/{district}/{cluster}/{school}/{date}/file),
+// so authorization is a comparison of path segments against the caller's scope
+// claims — no database read, which matters because a Storage rule cannot
+// afford one per object in a listing.
+//
+// No student name, date of birth or external code appears in any key
+// (Critical Rule 11). The filename is `OMR_{omrId}.jpg`; everything else lives
+// in Firestore.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function claims() {
+      return request.auth != null ? request.auth.token : {};
+    }
+
+    function role() {
+      return claims().get('role', '');
+    }
+
+    function isSignedIn() {
+      return request.auth != null && role() != '';
+    }
+
+    // Mirrors the Firestore matrix for the permissions that reach Storage.
+    function canViewOmrImage() {
+      return role() in ['SUPER_ADMIN', 'SUPERVISOR', 'PST_TEACHER',
+                        'SCANNER_OPERATOR'];
+    }
+
+    function canCaptureOmr() {
+      return role() in ['SUPER_ADMIN', 'PST_TEACHER', 'SCANNER_OPERATOR'];
+    }
+
+    function canProcessOmr() {
+      return canCaptureOmr();
+    }
+
+    function canValidateOmr() {
+      return role() in ['SUPER_ADMIN', 'SUPERVISOR'];
+    }
+
+    function canExportReports() {
+      return role() in ['SUPER_ADMIN', 'ASSESSMENT_ADMIN', 'SUPERVISOR',
+                        'VIEWER'];
+    }
+
+    function scopeLevel() { return claims().get('lvl', ''); }
+    function scopeStates()    { return claims().get('st', []); }
+    function scopeDistricts() { return claims().get('di', []); }
+    function scopeClusters()  { return claims().get('cl', []); }
+    function scopeSchools()   { return claims().get('sc', []); }
+
+    function inScopePath(stateId, districtId, clusterId, schoolId) {
+      return scopeLevel() == 'GLOBAL'
+        || schoolId in scopeSchools()
+        || (scopeLevel() == 'STATE'    && stateId in scopeStates())
+        || (scopeLevel() == 'DISTRICT' && districtId in scopeDistricts())
+        || (scopeLevel() == 'CLUSTER'  && clusterId in scopeClusters());
+    }
+
+    function isJpeg() {
+      return request.resource.contentType.matches('image/jpe?g');
+    }
+
+    // 8 MB matches AppConfig.maxOmrImageBytes. Large enough to keep bubble
+    // evidence readable (requirement section 43), small enough that a field
+    // upload completes on a weak link.
+    function withinSizeLimit() {
+      return request.resource.size < 8 * 1024 * 1024;
+    }
+
+    // ------------------------------------------------------ original sheets
+
+    match /omr/{year}/{assessmentId}/{stateId}/{districtId}/{clusterId}/{schoolId}/{date}/{fileName} {
+      allow read: if isSignedIn()
+                  && canViewOmrImage()
+                  && inScopePath(stateId, districtId, clusterId, schoolId);
+
+      allow create: if isSignedIn()
+                    && canCaptureOmr()
+                    && inScopePath(stateId, districtId, clusterId, schoolId)
+                    && isJpeg()
+                    && withinSizeLimit()
+                    && fileName.matches('OMR_[A-Za-z0-9_-]+\\.jpg');
+
+      // The original photograph is the audit evidence for every score derived
+      // from it. No client replaces or removes it — ever. Retention deletion
+      // runs under `enforceRetention` with admin credentials.
+      allow update, delete: if false;
+    }
+
+    // ----------------------------------------------------- processed sheets
+
+    match /omr_processed/{year}/{assessmentId}/{stateId}/{districtId}/{clusterId}/{schoolId}/{date}/{fileName} {
+      allow read: if isSignedIn()
+                  && canViewOmrImage()
+                  && inScopePath(stateId, districtId, clusterId, schoolId);
+
+      // Rectified images are derived artefacts, so a reprocess may replace
+      // them. The original above cannot be touched, which is what preserves
+      // the evidence.
+      allow create, update: if isSignedIn()
+                            && canProcessOmr()
+                            && inScopePath(stateId, districtId, clusterId,
+                                           schoolId)
+                            && isJpeg()
+                            && withinSizeLimit();
+
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------- bubble crops
+
+    match /omr_crops/{year}/{assessmentId}/{stateId}/{districtId}/{clusterId}/{schoolId}/{date}/{fileName} {
+      // The crop is what a validator looks at, so validators must read it too.
+      allow read: if isSignedIn()
+                  && (canViewOmrImage() || canValidateOmr())
+                  && inScopePath(stateId, districtId, clusterId, schoolId);
+
+      allow create, update: if isSignedIn()
+                            && canProcessOmr()
+                            && inScopePath(stateId, districtId, clusterId,
+                                           schoolId)
+                            && isJpeg()
+                            && request.resource.size < 512 * 1024;
+
+      allow delete: if false;
+    }
+
+    // ------------------------------------------------------------- reports
+
+    match /reports/{year}/{assessmentId}/{scopeLevelSegment}/{scopeId}/{fileName} {
+      // Reports are generated server-side and named after their scope, so the
+      // caller's own scope must contain that scope id at some level.
+      allow read: if isSignedIn()
+                  && canExportReports()
+                  && (scopeLevel() == 'GLOBAL'
+                      || scopeId in scopeStates()
+                      || scopeId in scopeDistricts()
+                      || scopeId in scopeClusters()
+                      || scopeId in scopeSchools());
+
+      // Written by the export function, never by a client.
+      allow write: if false;
+    }
+
+    // Anything not matched above is denied.
+  }
+}
