@@ -1,0 +1,621 @@
+rules_version = '2';
+
+// NATCO Assessment — Firestore security rules.
+//
+// These rules are the enforcement boundary. The Flutter client performs the
+// same checks for usability, but a patched APK gets exactly as far as this
+// file allows it (docs/04-security-model.md).
+//
+// Two questions are answered on every request:
+//   1. does the caller's ROLE hold the required permission?
+//   2. is the target inside the caller's geographic SCOPE?
+// Both must pass.
+//
+// Role and scope arrive as Auth custom claims, written by the `onUserWrite`
+// Cloud Function. Claims are used rather than a `users/{uid}` lookup because
+// a document read per request costs money and latency, and because `get()` is
+// not available inside a `list` rule at all.
+//
+// The permission matrix below mirrors
+// lib/features/auth/domain/entity/user_role.dart. A drift between the two is
+// a security bug; the Dart test suite asserts the counts, and this file is
+// reviewed alongside it.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------- claims
+
+    function claims() {
+      return request.auth != null ? request.auth.token : {};
+    }
+
+    function role() {
+      return claims().get('role', '');
+    }
+
+    function isSignedIn() {
+      return request.auth != null && role() != '';
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    // ------------------------------------------------------ permission matrix
+    //
+    // Mirrors kRolePermissions in the Dart source. Super Admin is written out
+    // rather than short-circuited, so that adding a permission is a deliberate
+    // decision about who receives it in both places.
+
+    function permissionsFor(r) {
+      return r == 'SUPER_ADMIN'
+        ? ['viewDashboard','viewSchools','manageStates','manageDistricts',
+           'manageClusters','manageSchools','viewStudents','manageStudents',
+           'importStudents','viewUsers','manageUsers','manageSystemConfig',
+           'viewAssessments','manageAssessments','manageQuestions',
+           'manageAnswerKey','manageAssessmentStatus','manageAssignments',
+           'conductAssessment','captureOmr','processOmr','reviewScanQuality',
+           'overrideQualityGate','viewOmrImage','resolveDuplicateOmr',
+           'validateOmr','reviewExceptions','viewResults','viewOwnSubmissions',
+           'correctScore','viewAnalytics','viewQuestionAnalytics',
+           'exportReports','syncSubmissions','resolveSyncConflict',
+           'calibrateScanner','viewAuditLog']
+      : r == 'ASSESSMENT_ADMIN'
+        ? ['viewDashboard','viewSchools','viewStudents','viewAssessments',
+           'manageAssessments','manageQuestions','manageAnswerKey',
+           'manageAssessmentStatus','manageAssignments','viewResults',
+           'viewAnalytics','viewQuestionAnalytics','exportReports']
+      : r == 'SUPERVISOR'
+        ? ['viewDashboard','viewSchools','viewStudents','viewAssessments',
+           'viewUsers','manageUsers','reviewScanQuality','overrideQualityGate',
+           'viewOmrImage','resolveDuplicateOmr','validateOmr',
+           'reviewExceptions','viewResults','viewAnalytics',
+           'viewQuestionAnalytics','exportReports','syncSubmissions',
+           'resolveSyncConflict']
+      : r == 'PST_TEACHER'
+        ? ['viewDashboard','viewSchools','viewStudents','manageStudents',
+           'viewAssessments','conductAssessment','captureOmr','processOmr',
+           'reviewScanQuality','viewOmrImage','viewResults',
+           'viewOwnSubmissions','exportReports','syncSubmissions']
+      : r == 'SCANNER_OPERATOR'
+        ? ['viewDashboard','viewAssessments','captureOmr','processOmr',
+           'reviewScanQuality','viewOmrImage','viewOwnSubmissions',
+           'syncSubmissions']
+      : r == 'VIEWER'
+        ? ['viewDashboard','viewSchools','viewStudents','viewAssessments',
+           'viewResults','viewAnalytics','viewQuestionAnalytics',
+           'exportReports']
+      // An unrecognised role receives nothing. A client running against a
+      // newer server must fail closed, not fall back to a default.
+      : [];
+    }
+
+    function hasPerm(p) {
+      return isSignedIn() && p in permissionsFor(role());
+    }
+
+    // Mirrors kAssignableRoles in user_role.dart. `manageUsers` alone answers
+    // "may this caller touch accounts at all" — it does not say which roles,
+    // and on its own would let a Supervisor mint a Super Admin, an
+    // escalation no scope check catches because a Super Admin has no scope to
+    // be outside of. This is the second half of that decision; scope is the
+    // third.
+    function assignableRoles(r) {
+      return r == 'SUPER_ADMIN'
+        ? ['SUPER_ADMIN','ASSESSMENT_ADMIN','SUPERVISOR','PST_TEACHER',
+           'SCANNER_OPERATOR','VIEWER']
+      : r == 'SUPERVISOR'
+        ? ['PST_TEACHER']
+      : [];
+    }
+
+    function canAssignRole(targetRole) {
+      return targetRole in assignableRoles(role());
+    }
+
+    // ----------------------------------------------------------------- scope
+
+    function scopeLevel() {
+      return claims().get('lvl', '');
+    }
+
+    function scopeStates()    { return claims().get('st', []); }
+    function scopeDistricts() { return claims().get('di', []); }
+    function scopeClusters()  { return claims().get('cl', []); }
+    function scopeSchools()   { return claims().get('sc', []); }
+    function scopeGradeSections() { return claims().get('gs', []); }
+
+    // A PST Teacher's `AccessScope` narrows to specific grade-sections within
+    // their school (Critical Rule 10: 5-A must not reach 5-B). `inScope()`
+    // stops at school, because a school is as far as most entities'
+    // ancestry goes — a student additionally carries `grade`/`section`, so
+    // this is checked on top of `inScope()`, not folded into it, wherever a
+    // student document is written. An empty claim means the scope was not
+    // narrowed, which the wire form (`AccessScope.toClaims`) only omits when
+    // there is nothing to narrow — so absence here means "every class",
+    // matching the Dart side.
+    function gradeSectionInScope(data) {
+      return scopeGradeSections().size() == 0
+        || (data.get('grade', '') + '-' + data.get('section', ''))
+             in scopeGradeSections();
+    }
+
+    // Every entity carries denormalised ancestry, so a scope test is a single
+    // membership check with no extra document reads.
+    //
+    // An explicitly enumerated school always matches. Otherwise the target must
+    // match on the scope's own level. A target that carries no value for that
+    // level does NOT match: absence of evidence is not access.
+    function inScope(data) {
+      return scopeLevel() == 'GLOBAL'
+        || (data.get('schoolId', '') != ''
+            && data.get('schoolId', '') in scopeSchools())
+        || (scopeLevel() == 'STATE'
+            && data.get('stateId', '') != ''
+            && data.get('stateId', '') in scopeStates())
+        || (scopeLevel() == 'DISTRICT'
+            && data.get('districtId', '') != ''
+            && data.get('districtId', '') in scopeDistricts())
+        || (scopeLevel() == 'CLUSTER'
+            && data.get('clusterId', '') != ''
+            && data.get('clusterId', '') in scopeClusters());
+    }
+
+    function readInScope() {
+      return inScope(resource.data);
+    }
+
+    // A user document does not carry one ancestry point — it carries a whole
+    // `scope` object, because that IS the thing being managed. `inScope()`
+    // cannot answer "may I see this account", so this mirrors
+    // AccessScope.isWithin (lib/features/auth/domain/entity/access_scope.dart):
+    // does the target's scope declare any id at the caller's own level that
+    // the caller also holds. A global caller sees everyone; a caller whose
+    // own scope is empty at their level sees nobody, never everyone.
+    function userInScope(data) {
+      return scopeLevel() == 'GLOBAL'
+        || (scopeLevel() == 'STATE'
+            && data.scope.stateIds.hasAny(scopeStates()))
+        || (scopeLevel() == 'DISTRICT'
+            && data.scope.districtIds.hasAny(scopeDistricts()))
+        || (scopeLevel() == 'CLUSTER'
+            && data.scope.clusterIds.hasAny(scopeClusters()))
+        || (scopeLevel() == 'SCHOOL'
+            && data.scope.schoolIds.hasAny(scopeSchools()));
+    }
+
+    // A write must be in scope both before and after, so a document cannot be
+    // moved out of the caller's reach (or dragged into it) by a write.
+    function writeInScope() {
+      return inScope(request.resource.data)
+        && (!exists(request.path) || inScope(resource.data));
+    }
+
+    // -------------------------------------------------------------- helpers
+
+    function unchanged(field) {
+      return request.resource.data.get(field, null)
+          == resource.data.get(field, null);
+    }
+
+    function allUnchanged(fields) {
+      return fields.toSet().difference(
+        request.resource.data.diff(resource.data).affectedKeys()
+      ).size() == fields.size();
+    }
+
+    function onlyChanged(fields) {
+      return request.resource.data.diff(resource.data)
+        .affectedKeys().hasOnly(fields.toSet());
+    }
+
+    // ============================================================== users
+
+    match /users/{userId} {
+      // A user always reads their own profile: role and scope are needed to
+      // render anything at all. Beyond that, `viewUsers` is necessary but not
+      // sufficient — a Supervisor holds it to onboard their own clusters'
+      // teachers, not to browse the whole programme's staff list, so the
+      // target's scope must also overlap the caller's.
+      allow get: if isSignedIn()
+                 && (userId == uid()
+                     || (hasPerm('viewUsers') && userInScope(resource.data)));
+      allow list: if hasPerm('viewUsers') && userInScope(resource.data);
+
+      // Self-service is limited to contact details. Nobody promotes
+      // themselves: `role`, `scope`, `isActive` and `claimsVersion` require
+      // manageUsers.
+      allow update: if isSignedIn()
+                    && userId == uid()
+                    && onlyChanged(['displayName', 'phone', 'updatedAt']);
+
+      // `manageUsers` is held by Super Admin (unrestricted) and Supervisor
+      // (bounded to PST Teacher, within their own clusters) — see
+      // `UserProvisioningPolicy` for the role and scope reasoning; this rule
+      // is the enforcement half, and both halves of that reasoning are
+      // checked, not just scope: `canAssignRole` closes the escalation a
+      // scope check alone would miss (a Super Admin has no scope to be
+      // outside of). A create must be in scope for the new account; an
+      // update must be in scope, and its role assignable, both for the
+      // account as it already stood and as it would become — so a Supervisor
+      // cannot reach outside their clusters in either direction, cannot
+      // touch an account currently outside their scope even to narrow it,
+      // and cannot promote an existing PST Teacher into a role they could
+      // not have created from nothing.
+      allow create: if hasPerm('manageUsers')
+                    && canAssignRole(request.resource.data.role)
+                    && userInScope(request.resource.data);
+      allow update: if hasPerm('manageUsers')
+                    && canAssignRole(resource.data.role)
+                    && canAssignRole(request.resource.data.role)
+                    && userInScope(request.resource.data)
+                    && userInScope(resource.data);
+      allow delete: if hasPerm('manageUsers')
+                    && canAssignRole(resource.data.role)
+                    && userInScope(resource.data);
+    }
+
+    // Uniqueness guard for sign-in addresses, keyed by the normalised email —
+    // the same guard-document pattern as `student_dedupe`, so two Supervisors
+    // onboarding the same teacher at once produce one account and one named
+    // rejection rather than two accounts that later disagree about scope.
+    match /user_email/{normalisedEmail} {
+      allow get:    if hasPerm('viewUsers');
+      allow list:   if hasPerm('manageUsers');
+      allow create: if hasPerm('manageUsers')
+                    && !exists(/databases/$(database)/documents/user_email/$(normalisedEmail));
+      // Never updated: an email guard that can be repointed guards nothing.
+      allow update: if false;
+      allow delete: if hasPerm('manageUsers');
+    }
+
+    // The role→permission mirror. Readable so an admin UI can render it;
+    // written only by deployment tooling with admin credentials.
+    match /roles/{roleId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ================================================== geographic hierarchy
+
+    match /states/{stateId} {
+      allow read:  if hasPerm('viewSchools')
+                   && (scopeLevel() == 'GLOBAL' || stateId in scopeStates());
+      allow write: if hasPerm('manageStates');
+    }
+
+    match /districts/{districtId} {
+      allow read:  if hasPerm('viewSchools') && readInScope();
+      allow write: if hasPerm('manageDistricts') && writeInScope();
+    }
+
+    match /clusters/{clusterId} {
+      allow read:  if hasPerm('viewSchools') && readInScope();
+      allow write: if hasPerm('manageClusters') && writeInScope();
+    }
+
+    match /schools/{schoolId} {
+      allow read:  if hasPerm('viewSchools') && readInScope();
+      allow write: if hasPerm('manageSchools') && writeInScope();
+    }
+
+    // ============================================================== students
+
+    match /students/{studentId} {
+      allow read:  if hasPerm('viewStudents') && readInScope();
+      // `manageStudents` is now held by both Super Admin and PST Teacher —
+      // the teacher registers their own class. `writeInScope()` alone stops
+      // at the school; `gradeSectionInScope()` is what keeps a 5-A teacher
+      // out of 5-B in their own school (Critical Rule 10).
+      allow create: if hasPerm('manageStudents')
+                    && writeInScope()
+                    && gradeSectionInScope(request.resource.data);
+      // The dedupe key is derived from identity fields. Letting it be edited
+      // would let two records for the same child coexist.
+      allow update: if hasPerm('manageStudents')
+                    && writeInScope()
+                    && gradeSectionInScope(request.resource.data)
+                    && gradeSectionInScope(resource.data)
+                    && unchanged('dedupeKey');
+      allow delete: if hasPerm('manageStudents')
+                    && readInScope()
+                    && gradeSectionInScope(resource.data);
+    }
+
+    // Existence of a document here means "this child already exists".
+    // Firestore has no unique constraint, so uniqueness is the existence of a
+    // guard document created in the same transaction as the student.
+    match /student_dedupe/{dedupeKey} {
+      allow get:    if hasPerm('viewStudents');
+      allow list:   if hasPerm('manageStudents');
+      allow create: if hasPerm('manageStudents')
+                    && !exists(/databases/$(database)/documents/student_dedupe/$(dedupeKey));
+      // Never updated: a dedupe key that can be rewritten guards nothing.
+      allow update: if false;
+      // Deletion is how a genuinely mistaken record is released, and it is
+      // audited by the same transaction that removes the student.
+      allow delete: if hasPerm('manageStudents');
+    }
+
+    match /student_enrollments/{enrollmentId} {
+      allow read:  if hasPerm('viewStudents') && readInScope();
+      allow write: if hasPerm('manageStudents') && writeInScope();
+    }
+
+    // =========================================================== assessments
+
+    // Mirrors AssessmentStatus.allowedNext (assessment.dart). Nothing returns
+    // to DRAFT, and ARCHIVED is terminal — a published assessment that could
+    // quietly return to draft is one whose answer key could be rewritten
+    // under results already scored against it.
+    function assessmentAllowedNext(status) {
+      return status == 'DRAFT'      ? ['PUBLISHED']
+           : status == 'PUBLISHED'  ? ['ACTIVE', 'CLOSED']
+           : status == 'ACTIVE'     ? ['CLOSED']
+           : status == 'CLOSED'     ? ['ARCHIVED']
+           : [];
+    }
+
+    match /assessments/{assessmentId} {
+      allow read:  if hasPerm('viewAssessments');
+      allow create: if hasPerm('manageAssessments')
+                    && request.resource.data.status == 'DRAFT'
+                    && request.resource.data.publishedAnswerKeyVersion == null;
+      allow update: if hasPerm('manageAssessments')
+                    // `totalQuestions`/`marksPerQuestion` are what every score
+                    // was computed from; only a draft may change them
+                    // (mirrors AssessmentRepositoryImpl.updateAssessment).
+                    && (resource.data.status == 'DRAFT'
+                        || allUnchanged(['totalQuestions', 'marksPerQuestion',
+                                         'omrTemplateId']))
+                    // A status change must be a legal transition, and nothing
+                    // else may change in the same write as one — an admin
+                    // moving an assessment to PUBLISHED cannot smuggle a
+                    // question-count edit through in the same request.
+                    && (unchanged('status')
+                        || (onlyChanged(['status', 'updatedAt'])
+                            && request.resource.data.status
+                               in assessmentAllowedNext(resource.data.status)))
+                    // The published key version is set only by the publish
+                    // write below, never smuggled through a plain edit: a
+                    // client that could point an assessment at an arbitrary
+                    // key version could silently change every score.
+                    && unchanged('publishedAnswerKeyVersion');
+
+      // The other half of publishing an answer key (see answer_keys below):
+      // both this field and the key document flip together, in the same
+      // transaction, so an assessment never points at an unpublished
+      // version. Gated on `manageAnswerKey` rather than `manageAssessments`,
+      // matching the permission that action actually requires, and the new
+      // version must strictly exceed the old one — versions only ever go up.
+      allow update: if hasPerm('manageAnswerKey')
+                    && onlyChanged(['publishedAnswerKeyVersion', 'updatedAt'])
+                    && request.resource.data.publishedAnswerKeyVersion is int
+                    // `toJson()` always writes this key, `null` until a first
+                    // publish — so "no key yet" has to be handled separately
+                    // from "a later version", not folded into one comparison.
+                    && (resource.data.publishedAnswerKeyVersion == null
+                        || request.resource.data.publishedAnswerKeyVersion
+                           > resource.data.publishedAnswerKeyVersion);
+      allow delete: if hasPerm('manageAssessments')
+                    && resource.data.status == 'DRAFT';
+    }
+
+    match /assessment_questions/{questionId} {
+      allow read:  if hasPerm('viewAssessments');
+      allow write: if hasPerm('manageQuestions');
+    }
+
+    // Answer keys are versioned and immutable once published (Critical
+    // Rule 7). `isPublished` mirrors AnswerKey.toJson() — there is no
+    // `status` field on this document; publication is a boolean that only
+    // ever flips false-to-true, never back.
+    match /answer_keys/{answerKeyId} {
+      allow read: if hasPerm('viewAssessments');
+
+      allow create: if hasPerm('manageAnswerKey')
+                    && request.resource.data.isPublished == false
+                    && request.resource.data.version is int
+                    && request.resource.data.version >= 1;
+
+      // A draft may be edited freely, including publishing it — which is the
+      // one update allowed to flip `isPublished` from false to true, and
+      // must do so with no other field changing (the write that also moves
+      // the assessment's `publishedAnswerKeyVersion`, checked above). Once
+      // published, nothing about this document may change again: version,
+      // supersession and every answer are frozen, because a score has been,
+      // or is about to be, computed from exactly this content.
+      allow update: if hasPerm('manageAnswerKey')
+                    && resource.data.isPublished == false
+                    && unchanged('version')
+                    && unchanged('assessmentId')
+                    && unchanged('supersedesVersion')
+                    && (request.resource.data.isPublished == false
+                        || (onlyChanged(['isPublished', 'publishedAt'])
+                            && request.resource.data.isPublished == true));
+
+      // A published key is evidence for every score computed from it.
+      allow delete: if hasPerm('manageAnswerKey')
+                    && resource.data.isPublished == false;
+    }
+
+    match /assessment_assignments/{assignmentId} {
+      allow read:  if hasPerm('viewAssessments') && readInScope();
+      allow write: if hasPerm('manageAssignments') && writeInScope();
+    }
+
+    // ============================================================== sessions
+
+    // Sessions are created and updated locally first (SessionStore,
+    // Critical Rule 12) and uploaded by the sync engine — phase 9, not yet
+    // built, so nothing in the app writes here today. Field names mirror
+    // AssessmentSession.toJson() (`conductedBy`, not `teacherUserId`) so that
+    // when phase 9 lands, this rule is already correct rather than another
+    // thing to rediscover.
+    match /assessment_sessions/{sessionId} {
+      allow read: if hasPerm('viewAssessments')
+                  && readInScope()
+                  && gradeSectionInScope(resource.data);
+
+      allow create: if hasPerm('conductAssessment')
+                    && writeInScope()
+                    && gradeSectionInScope(request.resource.data)
+                    && request.resource.data.conductedBy == uid();
+
+      // A teacher may only advance their own session. Reassigning a session
+      // to another teacher would rewrite who is accountable for the sheets
+      // in it.
+      allow update: if hasPerm('conductAssessment')
+                    && writeInScope()
+                    && gradeSectionInScope(resource.data)
+                    && resource.data.conductedBy == uid()
+                    && unchanged('conductedBy')
+                    && unchanged('schoolId')
+                    && unchanged('assessmentId')
+                    && unchanged('answerKeyVersion');
+
+      // Sessions are records of work performed. They are closed (ABANDONED
+      // or COMPLETED), not removed.
+      allow delete: if false;
+    }
+
+    // =================================================================== OMR
+
+    // Existence means "this OMR ID has been used". Created in the same
+    // transaction as the submission, which is what makes duplicate detection
+    // atomic rather than a racy pre-read (Critical Rule 7).
+    match /omr_registry/{omrId} {
+      // Readable by anyone who may capture or review, so the duplicate dialog
+      // can show where and when the earlier sheet was submitted.
+      allow get: if hasPerm('captureOmr') || hasPerm('reviewScanQuality');
+      allow list: if hasPerm('reviewExceptions');
+      allow create: if hasPerm('captureOmr')
+                    && !exists(/databases/$(database)/documents/omr_registry/$(omrId));
+      // Never rewritten and never removed: an OMR ID is not reusable.
+      allow update, delete: if false;
+    }
+
+    match /omr_submissions/{submissionId} {
+      allow read: if (hasPerm('reviewScanQuality') && readInScope())
+                  || (hasPerm('viewOwnSubmissions')
+                      && resource.data.capturedBy == uid());
+
+      allow create: if hasPerm('captureOmr')
+                    && writeInScope()
+                    && request.resource.data.capturedBy == uid()
+                    && request.resource.data.processingStatus == 'CAPTURED';
+
+      allow update: if writeInScope()
+                    // Provenance is fixed at capture.
+                    && unchanged('omrId')
+                    && unchanged('capturedBy')
+                    && unchanged('capturedAt')
+                    && unchanged('deviceId')
+                    && unchanged('originalImagePath')
+                    // Scores are written by the `scoreSubmission` function
+                    // only (Critical Rule 5).
+                    && unchanged('machineScore')
+                    && unchanged('finalScore')
+                    && unchanged('answerKeyVersion')
+                    && (
+                      // The capturer drives their own sheet through
+                      // processing.
+                      (hasPerm('processOmr')
+                       && resource.data.capturedBy == uid())
+                      // A validator resolves validation and duplicates.
+                      || hasPerm('validateOmr')
+                      || hasPerm('resolveDuplicateOmr')
+                    );
+
+      // Captured sheets are evidence (Critical Rule 15). Retention deletion
+      // runs server-side under `enforceRetention`.
+      allow delete: if false;
+    }
+
+    // Machine detection results are write-once. This is the rule that makes
+    // "never overwrite the machine result" (requirement section 20) true
+    // rather than aspirational.
+    match /omr_answers/{omrAnswerId} {
+      allow read: if hasPerm('reviewScanQuality') || hasPerm('validateOmr');
+
+      allow create: if hasPerm('processOmr');
+
+      allow update: if hasPerm('validateOmr')
+                    && allUnchanged([
+                         'omrId', 'questionNumber',
+                         'machineAnswer', 'machineConfidence',
+                         'machineStatus', 'optionScores'
+                       ])
+                    // Correctness and marks come from the scoring function.
+                    && unchanged('isCorrect')
+                    && unchanged('marks')
+                    && request.resource.data.validatedBy == uid();
+
+      allow delete: if false;
+    }
+
+    // Append-only log of validation decisions, so a re-validation does not
+    // erase the first one.
+    match /omr_validations/{validationId} {
+      allow read:   if hasPerm('validateOmr') || hasPerm('reviewExceptions');
+      allow create: if hasPerm('validateOmr')
+                    && request.resource.data.validatorUserId == uid();
+      allow update, delete: if false;
+    }
+
+    // =============================================================== results
+
+    // Scores are computed server-side by `scoreSubmission` and corrected by
+    // `rescoreAssessment`. No client writes a score, under any role — that is
+    // Critical Rule 5 expressed as a rule rather than a convention.
+    match /results/{resultId} {
+      allow read: if (hasPerm('viewResults') && readInScope())
+                  || (hasPerm('viewOwnSubmissions')
+                      && resource.data.get('scoredBy', '') == uid());
+      allow write: if false;
+    }
+
+    // ============================================================= analytics
+
+    match /question_analytics/{analyticsId} {
+      allow read:  if hasPerm('viewQuestionAnalytics');
+      allow write: if false;   // written by `aggregateAnalytics`
+    }
+
+    match /scope_analytics/{analyticsId} {
+      allow read:  if hasPerm('viewAnalytics') && readInScope();
+      allow write: if false;   // written by `aggregateAnalytics`
+    }
+
+    // ============================================================ audit logs
+
+    // Append-only for everyone, Super Admin included. An audit trail that a
+    // privileged user can edit is not an audit trail.
+    match /audit_logs/{auditId} {
+      allow read: if hasPerm('viewAuditLog');
+      allow create: if isSignedIn()
+                    && request.resource.data.userId == uid()
+                    && request.resource.data.role == role();
+      allow update, delete: if false;
+    }
+
+    // ================================================================ config
+
+    match /app_config/{configId} {
+      // Every signed-in client reads configuration: thresholds, feature flags
+      // and controlled vocabularies.
+      allow read: if isSignedIn();
+      allow write: if hasPerm('manageSystemConfig');
+    }
+
+    // Server-side idempotency ledger. Clients create receipts through the
+    // callable functions, never directly.
+    match /sync_receipts/{idempotencyKey} {
+      allow read, write: if false;
+    }
+
+    // Anything not matched above is denied. Adding a collection without adding
+    // a rule makes it unreachable, which is the correct failure direction.
+  }
+}

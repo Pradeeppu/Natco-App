@@ -1,0 +1,3 @@
+﻿# The NATCO OMR template JSON lands here in phase 6 (docs/07-omr-pipeline.md).
+# Git cannot track an empty directory, and pubspec.yaml already declares this
+# asset path, so this file keeps the declaration valid.
