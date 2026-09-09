@@ -124,12 +124,16 @@ final List<GuardedRoute> kAppRoutes = <GuardedRoute>[
     path: RoutePaths.assessmentDetail,
     rule: const RouteAccessRule.requires(Permission.viewAssessments),
     insideShell: true,
-    builder: (_, _) => const AssessmentDetailScreen(),
+    builder: (_, GoRouterState state) => AssessmentDetailScreen(
+      assessmentId: state.pathParameters['assessmentId']!,
+    ),
   ),
   GuardedRoute(
     path: RoutePaths.answerKey,
     rule: const RouteAccessRule.requires(Permission.manageAnswerKey),
-    builder: (_, _) => const AnswerKeyScreen(),
+    builder: (_, GoRouterState state) => AnswerKeyScreen(
+      assessmentId: state.pathParameters['assessmentId']!,
+    ),
   ),
   GuardedRoute(
     path: RoutePaths.assessmentSession,

@@ -23,7 +23,11 @@ import 'package:natco_app/core/services/device_info_service.dart';
 import 'package:natco_app/core/services/logger.dart';
 import 'package:natco_app/core/utils/clock.dart';
 import 'package:natco_app/core/utils/id_generator.dart';
+import 'package:natco_app/data/local/demo_assessment_data.dart';
 import 'package:natco_app/data/local/demo_master_data.dart';
+import 'package:natco_app/features/assessments/data/repository/firestore_assessments_repository.dart';
+import 'package:natco_app/features/assessments/data/repository/in_memory_assessments_repository.dart';
+import 'package:natco_app/features/assessments/domain/repository/assessments_repository.dart';
 import 'package:natco_app/features/auth/data/repository/auth_repository_impl.dart';
 import 'package:natco_app/features/auth/data/service/auth_service.dart';
 import 'package:natco_app/features/auth/data/service/firebase_auth_service.dart';
@@ -34,6 +38,7 @@ import 'package:natco_app/features/auth/presentation/controller/session_controll
 import 'package:natco_app/features/auth/presentation/controller/session_state.dart';
 import 'package:natco_app/features/schools/data/repository/firestore_schools_repository.dart';
 import 'package:natco_app/features/schools/data/repository/in_memory_schools_repository.dart';
+import 'package:natco_app/features/schools/domain/entity/school.dart';
 import 'package:natco_app/features/schools/domain/repository/schools_repository.dart';
 import 'package:natco_app/features/students/data/repository/firestore_students_repository.dart';
 import 'package:natco_app/features/students/data/repository/in_memory_students_repository.dart';
@@ -187,10 +192,15 @@ final NotifierProvider<SessionController, SessionState> sessionProvider =
 /// as a single dataset. Two independent providers each constructing their
 /// own repository would seed two unrelated worlds.
 final class _InMemoryMasterData {
-  const _InMemoryMasterData({required this.schools, required this.students});
+  const _InMemoryMasterData({
+    required this.schools,
+    required this.students,
+    required this.assessments,
+  });
 
   final InMemorySchoolsRepository schools;
   final InMemoryStudentsRepository students;
+  final InMemoryAssessmentsRepository assessments;
 }
 
 final Provider<_InMemoryMasterData> _inMemoryMasterDataProvider =
@@ -206,15 +216,31 @@ final Provider<_InMemoryMasterData> _inMemoryMasterDataProvider =
         clock: clock,
         schools: schools,
       );
+      final InMemoryAssessmentsRepository assessments =
+          InMemoryAssessmentsRepository(
+            idGenerator: idGenerator,
+            clock: clock,
+            schools: schools,
+          );
       if (ref.watch(appConfigProvider).featureFlags.enableDemoSeedData) {
-        seedDemoMasterData(
+        final List<School> seededSchools = seedDemoMasterData(
           schools: schools,
           students: students,
           idGenerator: idGenerator,
           clock: clock,
         );
+        seedDemoAssessmentData(
+          assessments: assessments,
+          seededSchools: seededSchools,
+          idGenerator: idGenerator,
+          clock: clock,
+        );
       }
-      return _InMemoryMasterData(schools: schools, students: students);
+      return _InMemoryMasterData(
+        schools: schools,
+        students: students,
+        assessments: assessments,
+      );
     });
 
 final Provider<SchoolsRepository> schoolsRepositoryProvider =
@@ -235,6 +261,17 @@ final Provider<StudentsRepository> studentsRepositoryProvider =
       return FirestoreStudentsRepository(
         firestore: FirebaseFirestore.instance,
         idGenerator: ref.watch(idGeneratorProvider),
+      );
+    });
+
+final Provider<AssessmentsRepository> assessmentsRepositoryProvider =
+    Provider<AssessmentsRepository>((Ref ref) {
+      final AppConfig config = ref.watch(appConfigProvider);
+      if (!config.environment.usesFirebase) {
+        return ref.watch(_inMemoryMasterDataProvider).assessments;
+      }
+      return FirestoreAssessmentsRepository(
+        firestore: FirebaseFirestore.instance,
       );
     });
 

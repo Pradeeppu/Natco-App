@@ -34,7 +34,13 @@ const List<String> _lastNames = <String>[
 /// Deterministic given the same [idGenerator] and [clock]: two calls with
 /// fresh `SequentialIdGenerator`s produce identical data, which is what makes
 /// this usable directly in widget tests, not only in the shipped demo build.
-void seedDemoMasterData({
+///
+/// Returns the 5 seeded schools, in seeding order, so a later seed step (demo
+/// assessment assignments) can target a real school without a lookup of its
+/// own — `InMemorySchoolsRepository`'s own list methods are `async` for
+/// interface parity with Firestore, which a synchronous seeding step like
+/// this one cannot await.
+List<School> seedDemoMasterData({
   required InMemorySchoolsRepository schools,
   required InMemoryStudentsRepository students,
   required IdGenerator idGenerator,
@@ -182,4 +188,6 @@ void seedDemoMasterData({
       dateOfBirth: dob,
     );
   }
+
+  return seededSchools;
 }

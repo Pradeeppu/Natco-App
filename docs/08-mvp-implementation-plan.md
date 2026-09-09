@@ -8,8 +8,8 @@ says "this is done", not "this compiles".
 |-------|-------|---------------|--------|
 | **1. Foundation** | project, architecture, theme, routing, config, auth, role + scope system, security rules, logging, error model | login works against Firebase and in demo mode; every route guarded; permission matrix unit-tested for all 6 roles; `flutter analyze` clean; test suite green | **complete** |
 | **2. Master data** | states, districts, clusters, schools, students, CSV import, search, pagination | hierarchy CRUD within scope; duplicate student rejected with a named reason; 2 000-student school scrolls without loading all rows | **complete** |
-| 3. Assessments | assessments, questions, answer keys (versioned), assignments | key v1 publishes and becomes immutable; a correction produces v2 with a reason and supersedes v1 | next |
-| 4. Offline assessment | Hive boxes, pre-download, session lifecycle, reconciler | session survives force-stop; airplane-mode run completes end to end | |
+| **3. Assessments** | assessments, questions, answer keys (versioned), assignments | key v1 publishes and becomes immutable; a correction produces v2 with a reason and supersedes v1 | **complete** |
+| 4. Offline assessment | Hive boxes, pre-download, session lifecycle, reconciler | session survives force-stop; airplane-mode run completes end to end | next |
 | 5. OMR capture | camera, gallery, quality gate, durable image write, manual ID entry | image on disk before any processing; each quality failure gives its own message; kill-during-capture loses nothing | |
 | 6. OMR engine | template JSON, markers, homography, rotation, sampling, classification, confidence | pipeline runs in a worker isolate; golden dataset harness reports measured accuracy; upside-down sheet is detected, not silently inverted | |
 | 7. Validation | review queue, per-question validation UI, audit trail | machine fields provably unchanged after validation; a submission needing validation cannot reach `SCORED` | |
@@ -155,3 +155,65 @@ Delivered in `natco_app/`:
   widget smoke tests driving the real screens end to end (hierarchy
   drill-down, breadcrumb navigation, search, a single-school-scoped teacher
   landing with no picker, adding a student, duplicate rejection, CSV import).
+
+## Phase 3 — what was built
+
+Delivered in `natco_app/`:
+
+- **Assessment domain**: `Assessment` (deliberately carries no school/
+  cluster/district/state ancestry — the definition itself, its questions and
+  its answer key are shared across the whole system; only
+  `AssessmentAssignment` connects one to a school, and scope checks apply
+  there, not to the definition), `AssessmentStatus` as a linear, forward-only
+  state machine (`DRAFT → PUBLISHED → ACTIVE → SCORING_LOCKED → CLOSED →
+  ARCHIVED`), `AssessmentQuestion`, `AnswerKey` + `AnswerKeyStatus`, and
+  `AssessmentAssignment` + `AssignmentStatus`.
+- **Answer-key immutability by construction, not convention**:
+  `AssessmentsRepository` exposes no method that can edit a published key's
+  answers — `publishAnswerKey` is the only write path. The first call
+  publishes version 1 directly; every call after that is a correction,
+  requires a `changeReason`, and atomically marks the previously published
+  version `SUPERSEDED` (with `supersededBy` pointing at the new version)
+  while the new version becomes `PUBLISHED`. An old version's answers are
+  never overwritten, so a score against it always stays explainable.
+- **A pure answer-key parser** (`AnswerKeyParser`): turns a comma-separated
+  answer string into a `{questionNumber: option}` map with per-position parse
+  errors (missing answer, invalid option, wrong count) before anything
+  reaches the repository — the same "parse, then persist" split
+  `StudentCsvImporter` uses.
+- **In-memory implementation**: `InMemoryAssessmentsRepository`, covering
+  assessment/question CRUD (questions editable only while the assessment is
+  still a draft — once published, the paper is printed), the answer-key
+  publish/correct/supersede flow above, and scope-aware assignment listing
+  that resolves each assignment's school through `InMemorySchoolsRepository`
+  for its ancestry, the same pattern `InMemoryStudentsRepository` uses and
+  for the same reason: `AssessmentAssignment` itself only carries `schoolId`.
+- **Firestore implementation**: `FirestoreAssessmentsRepository`, using the
+  documented deterministic answer-key document id `{assessmentId}_v{version}`
+  (docs/03-firestore-schema.md) so `publishAnswerKey` can find "the currently
+  published version" with a single `transaction.get` by reference —
+  `Assessment.activeAnswerKeyVersion` names which version that is — rather
+  than a query, which the client SDK cannot run inside a transaction.
+  Publishing and superseding happen atomically inside one transaction: a
+  reader never sees two `PUBLISHED` versions.
+- **Demo dataset** (`data/local/demo_assessment_data.dart`): one fresh `DRAFT`
+  assessment with no key yet, and one `ACTIVE` assessment already carrying a
+  `SUPERSEDED` v1 and a `PUBLISHED` v2 with a change reason, assigned to one
+  of the schools `seedDemoMasterData` seeds — so the demo build shows the
+  whole correction story without anyone driving it by hand first.
+- **Screens**: a searchable, status-filterable assessments list; an
+  assessment detail screen (status, questions, answer-key summary,
+  assignments, and the single legal next status transition); and an answer
+  key screen with full version history and the publish/correct entry dialog.
+- **Tests**: unit tests for the answer-key parser; both status state machines
+  (every transition pair checked, not just the happy path); the repository's
+  creation validation (duplicate code, non-positive question count),
+  draft-only question editing, the status state machine including the
+  "cannot activate without a published key" rule, assignment scope isolation,
+  and — the two Phase 3 exit criteria — a v1 key publishing directly and
+  becoming immutable, and a correction producing v2 with a reason that
+  supersedes v1 while leaving v1's own answers untouched; a demo-dataset test
+  asserting the seeded correction story; and widget smoke tests driving the
+  real screens end to end, including publishing a v1 key, correcting it to
+  v2 through the actual dialog, and confirming a correction is refused
+  without a reason.
