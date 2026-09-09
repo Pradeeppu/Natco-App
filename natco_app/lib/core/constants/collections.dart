@@ -45,6 +45,7 @@ abstract final class LocalBoxes {
   static const String assessments = 'natco_assessments';
   static const String answerKeys = 'natco_answer_keys';
   static const String sessions = 'natco_assessment_sessions';
+  static const String sessionPrerequisites = 'natco_session_prerequisites';
   static const String omrSubmissions = 'natco_omr_submissions';
   static const String omrAnswers = 'natco_omr_answers';
   static const String auditQueue = 'natco_audit_queue';

@@ -92,7 +92,7 @@ final class DashboardScreen extends ConsumerWidget {
         label: 'Start or continue assessment',
         description: 'Run a session for your assigned grade and section',
         icon: Icons.play_circle_outline,
-        route: RoutePaths.assessments,
+        route: RoutePaths.sessions,
         permission: Permission.conductAssessment,
         isPrimary: true,
       ),

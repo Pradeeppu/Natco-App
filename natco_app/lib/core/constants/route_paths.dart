@@ -22,6 +22,7 @@ abstract final class RoutePaths {
   static const String assessmentDetail = '/assessments/:assessmentId';
   static const String answerKey = '/assessments/:assessmentId/answer-key';
 
+  static const String sessions = '/sessions';
   static const String assessmentSession = '/assessment-session/:sessionId';
 
   static const String omrCapture = '/omr/capture';

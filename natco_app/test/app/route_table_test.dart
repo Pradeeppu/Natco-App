@@ -26,6 +26,7 @@ const List<String> _declaredPaths = <String>[
   RoutePaths.assessments,
   RoutePaths.assessmentDetail,
   RoutePaths.answerKey,
+  RoutePaths.sessions,
   RoutePaths.assessmentSession,
   RoutePaths.omrCapture,
   RoutePaths.omrReview,

@@ -1,25 +1,233 @@
-/// Assessment session screen.
+/// A live assessment session for one school, grade and section.
 ///
-/// Implemented in Phase 4 - Offline Assessment; see docs/08-mvp-implementation-plan.md.
+/// Deliberately outside the shell (see `GuardedRoute.insideShell`'s doc
+/// comment): a live session is a full-screen task, and a teacher should not
+/// be able to wander off mid-session by tapping the navigation bar.
 library;
 
 import 'package:flutter/material.dart';
-import 'package:natco_app/core/widgets/feature_preview_screen.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:natco_app/core/errors/failure.dart';
+import 'package:natco_app/core/widgets/app_state_views.dart';
+import 'package:natco_app/features/assessment_sessions/domain/entity/assessment_session.dart';
+import 'package:natco_app/features/assessment_sessions/domain/entity/session_status.dart';
+import 'package:natco_app/features/assessment_sessions/presentation/controller/session_controller.dart';
 
-final class AssessmentSessionScreen extends StatelessWidget {
-  const AssessmentSessionScreen({super.key});
+final class AssessmentSessionScreen extends ConsumerStatefulWidget {
+  const AssessmentSessionScreen({required this.sessionId, super.key});
+
+  final String sessionId;
 
   @override
-  Widget build(BuildContext context) => const FeaturePreviewScreen(
-    title: 'Assessment session',
-    phase: 'Phase 4 - Offline Assessment',
-    icon: Icons.play_circle_outline,
-    summary: 'A live assessment session for one school, grade and section. Runs entirely offline and survives the app being killed.',
-    capabilities: <String>[
-      'Session lifecycle from draft to closed, with rejected illegal transitions',
-      'Student roster pre-downloaded for the assigned grade and section',
-      'Local-first writes, so nothing depends on a connection',
-      'Recovery on restart, with no silent data loss',
-    ],
+  ConsumerState<AssessmentSessionScreen> createState() =>
+      _AssessmentSessionScreenState();
+}
+
+class _AssessmentSessionScreenState
+    extends ConsumerState<AssessmentSessionScreen> {
+  @override
+  void initState() {
+    super.initState();
+    Future<void>.microtask(
+      () => ref
+          .read(sessionControllerProvider.notifier)
+          .viewSession(widget.sessionId),
+    );
+  }
+
+  Future<void> _confirmEndSession() async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) => AlertDialog(
+        title: const Text('End session?'),
+        content: const Text(
+          'This closes the session for everyone. You cannot resume it '
+          'afterwards.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('End session'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed ?? false) {
+      await ref.read(sessionControllerProvider.notifier).endSession();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final SessionDetailState state = ref.watch(sessionControllerProvider);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Session'),
+        leading: state.session?.status == SessionStatus.completed
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => context.go('/dashboard'),
+              )
+            : null,
+        automaticallyImplyLeading: false,
+      ),
+      body: SafeArea(
+        child: state.isLoading && state.session == null
+            ? const LoadingView()
+            : state.failure != null && state.session == null
+            ? FailureView(
+                failure: state.failure!,
+                onRetry: () => ref
+                    .read(sessionControllerProvider.notifier)
+                    .viewSession(widget.sessionId),
+              )
+            : state.session == null
+            ? const EmptyView(
+                title: 'Session not found',
+                icon: Icons.play_circle_outline,
+              )
+            : _SessionBody(
+                session: state.session!,
+                failure: state.failure,
+                onEndSession: _confirmEndSession,
+              ),
+      ),
+    );
+  }
+}
+
+final class _SessionBody extends StatelessWidget {
+  const _SessionBody({
+    required this.session,
+    required this.failure,
+    required this.onEndSession,
+  });
+
+  final AssessmentSession session;
+  final Failure? failure;
+  final VoidCallback onEndSession;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final bool isCompleted = session.status == SessionStatus.completed;
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: <Widget>[
+        if (failure != null) ...<Widget>[
+          InfoBanner(
+            message: failure!.userMessage,
+            icon: Icons.error_outline,
+            isWarning: true,
+          ),
+          const SizedBox(height: 16),
+        ],
+        Icon(
+          isCompleted ? Icons.check_circle_outline : Icons.play_circle_outline,
+          size: 56,
+          color: isCompleted ? Colors.green : theme.colorScheme.primary,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Grade ${session.grade} · Section ${session.section}',
+          style: theme.textTheme.headlineSmall,
+          textAlign: TextAlign.center,
+        ),
+        Text(
+          '${session.subject} · ${session.academicYear}',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 20),
+        Center(child: Chip(label: Text(session.status.displayName))),
+        const SizedBox(height: 20),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: <Widget>[
+                _StatRow(
+                  label: 'Students on roster',
+                  value: '${session.studentIds.length}',
+                ),
+                _StatRow(
+                  label: 'Expected',
+                  value: '${session.expectedStudentCount}',
+                ),
+                if (session.startedAt != null)
+                  _StatRow(
+                    label: 'Started',
+                    value: _formatTime(session.startedAt!),
+                  ),
+                if (session.endedAt != null)
+                  _StatRow(
+                    label: 'Ended',
+                    value: _formatTime(session.endedAt!),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        if (isCompleted)
+          const Text(
+            'This session is complete. Capturing OMR sheets for it will be '
+            'possible once Phase 5 adds OMR capture.',
+            textAlign: TextAlign.center,
+          )
+        else ...<Widget>[
+          const Text(
+            'Running entirely on this device — no connection is needed to '
+            'continue. OMR capture arrives in Phase 5; for now, end the '
+            'session when you are done.',
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: onEndSession,
+            icon: const Icon(Icons.stop_circle_outlined),
+            label: const Text('End session'),
+          ),
+        ],
+      ],
+    );
+  }
+
+  static String _formatTime(DateTime time) {
+    final DateTime local = time.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(local.hour)}:${two(local.minute)}';
+  }
+}
+
+final class _StatRow extends StatelessWidget {
+  const _StatRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: <Widget>[
+        Text(label, style: Theme.of(context).textTheme.bodyMedium),
+        Text(
+          value,
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+        ),
+      ],
+    ),
   );
 }

@@ -16,6 +16,7 @@ import 'package:natco_app/app/shell.dart';
 import 'package:natco_app/core/constants/route_paths.dart';
 import 'package:natco_app/features/analytics/presentation/screen/analytics_screen.dart';
 import 'package:natco_app/features/assessment_sessions/presentation/screen/assessment_session_screen.dart';
+import 'package:natco_app/features/assessment_sessions/presentation/screen/sessions_screen.dart';
 import 'package:natco_app/features/assessments/presentation/screen/answer_key_screen.dart';
 import 'package:natco_app/features/assessments/presentation/screen/assessment_detail_screen.dart';
 import 'package:natco_app/features/assessments/presentation/screen/assessments_screen.dart';
@@ -136,9 +137,17 @@ final List<GuardedRoute> kAppRoutes = <GuardedRoute>[
     ),
   ),
   GuardedRoute(
+    path: RoutePaths.sessions,
+    rule: const RouteAccessRule.requires(Permission.conductAssessment),
+    insideShell: true,
+    builder: (_, _) => const SessionsScreen(),
+  ),
+  GuardedRoute(
     path: RoutePaths.assessmentSession,
     rule: const RouteAccessRule.requires(Permission.conductAssessment),
-    builder: (_, _) => const AssessmentSessionScreen(),
+    builder: (_, GoRouterState state) => AssessmentSessionScreen(
+      sessionId: state.pathParameters['sessionId']!,
+    ),
   ),
   GuardedRoute(
     path: RoutePaths.omrCapture,

@@ -25,6 +25,13 @@ import 'package:natco_app/core/utils/clock.dart';
 import 'package:natco_app/core/utils/id_generator.dart';
 import 'package:natco_app/data/local/demo_assessment_data.dart';
 import 'package:natco_app/data/local/demo_master_data.dart';
+import 'package:natco_app/features/assessment_sessions/data/repository/hive_assessment_sessions_repository.dart';
+import 'package:natco_app/features/assessment_sessions/data/repository/hive_session_prerequisites_repository.dart';
+import 'package:natco_app/features/assessment_sessions/data/repository/in_memory_assessment_sessions_repository.dart';
+import 'package:natco_app/features/assessment_sessions/data/repository/in_memory_session_prerequisites_repository.dart';
+import 'package:natco_app/features/assessment_sessions/domain/repository/assessment_sessions_repository.dart';
+import 'package:natco_app/features/assessment_sessions/domain/repository/session_prerequisites_repository.dart';
+import 'package:natco_app/features/assessment_sessions/domain/service/session_prerequisites_downloader.dart';
 import 'package:natco_app/features/assessments/data/repository/firestore_assessments_repository.dart';
 import 'package:natco_app/features/assessments/data/repository/in_memory_assessments_repository.dart';
 import 'package:natco_app/features/assessments/domain/repository/assessments_repository.dart';
@@ -272,6 +279,59 @@ final Provider<AssessmentsRepository> assessmentsRepositoryProvider =
       }
       return FirestoreAssessmentsRepository(
         firestore: FirebaseFirestore.instance,
+      );
+    });
+
+/// Local cache of session prerequisites: pure Hive storage in real
+/// environments, an in-memory map in demo/tests — the same environment split
+/// every other repository in this file uses, and consistent with it: demo
+/// mode does not need to survive a real process restart, and using Hive
+/// there would only add I/O to widget tests that already run the whole app
+/// in memory.
+final Provider<SessionPrerequisitesRepository>
+sessionPrerequisitesRepositoryProvider = Provider<SessionPrerequisitesRepository>((
+  Ref ref,
+) {
+  final AppConfig config = ref.watch(appConfigProvider);
+  if (!config.environment.usesFirebase) {
+    return InMemorySessionPrerequisitesRepository();
+  }
+  return HiveSessionPrerequisitesRepository(
+    hive: ref.watch(hiveProvider),
+    logger: ref.watch(loggerProvider),
+  );
+});
+
+final Provider<SessionPrerequisitesDownloader>
+sessionPrerequisitesDownloaderProvider = Provider<SessionPrerequisitesDownloader>((
+  Ref ref,
+) => SessionPrerequisitesDownloader(
+  assessments: ref.watch(assessmentsRepositoryProvider),
+  schools: ref.watch(schoolsRepositoryProvider),
+  students: ref.watch(studentsRepositoryProvider),
+  cache: ref.watch(sessionPrerequisitesRepositoryProvider),
+  clock: ref.watch(clockProvider),
+));
+
+/// A teacher's assessment sessions. Always local-first (docs/06-offline-sync-
+/// strategy.md §1): even the Firebase-backed environments use Hive here, not
+/// Firestore, because a session has to be startable and runnable with no
+/// network at all. Only demo/tests use the in-memory variant, which does not
+/// need to survive a real process restart.
+final Provider<AssessmentSessionsRepository> assessmentSessionsRepositoryProvider =
+    Provider<AssessmentSessionsRepository>((Ref ref) {
+      final AppConfig config = ref.watch(appConfigProvider);
+      if (!config.environment.usesFirebase) {
+        return InMemoryAssessmentSessionsRepository(
+          idGenerator: ref.watch(idGeneratorProvider),
+          clock: ref.watch(clockProvider),
+        );
+      }
+      return HiveAssessmentSessionsRepository(
+        hive: ref.watch(hiveProvider),
+        idGenerator: ref.watch(idGeneratorProvider),
+        clock: ref.watch(clockProvider),
+        logger: ref.watch(loggerProvider),
       );
     });
 

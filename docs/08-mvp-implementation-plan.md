@@ -9,8 +9,8 @@ says "this is done", not "this compiles".
 | **1. Foundation** | project, architecture, theme, routing, config, auth, role + scope system, security rules, logging, error model | login works against Firebase and in demo mode; every route guarded; permission matrix unit-tested for all 6 roles; `flutter analyze` clean; test suite green | **complete** |
 | **2. Master data** | states, districts, clusters, schools, students, CSV import, search, pagination | hierarchy CRUD within scope; duplicate student rejected with a named reason; 2 000-student school scrolls without loading all rows | **complete** |
 | **3. Assessments** | assessments, questions, answer keys (versioned), assignments | key v1 publishes and becomes immutable; a correction produces v2 with a reason and supersedes v1 | **complete** |
-| 4. Offline assessment | Hive boxes, pre-download, session lifecycle, reconciler | session survives force-stop; airplane-mode run completes end to end | next |
-| 5. OMR capture | camera, gallery, quality gate, durable image write, manual ID entry | image on disk before any processing; each quality failure gives its own message; kill-during-capture loses nothing | |
+| **4. Offline assessment** | Hive boxes, pre-download, session lifecycle, reconciler | session survives force-stop; airplane-mode run completes end to end | **complete** |
+| 5. OMR capture | camera, gallery, quality gate, durable image write, manual ID entry | image on disk before any processing; each quality failure gives its own message; kill-during-capture loses nothing | next |
 | 6. OMR engine | template JSON, markers, homography, rotation, sampling, classification, confidence | pipeline runs in a worker isolate; golden dataset harness reports measured accuracy; upside-down sheet is detected, not silently inverted | |
 | 7. Validation | review queue, per-question validation UI, audit trail | machine fields provably unchanged after validation; a submission needing validation cannot reach `SCORED` | |
 | 8. Scoring | scoring engine, results, question-level results | client and server scores agree on the dataset; re-score supersedes instead of mutating | |
@@ -217,3 +217,65 @@ Delivered in `natco_app/`:
   real screens end to end, including publishing a v1 key, correcting it to
   v2 through the actual dialog, and confirming a correction is refused
   without a reason.
+
+## Phase 4 — what was built
+
+Delivered in `natco_app/`:
+
+- **Session domain**: `AssessmentSession` and a linear `SessionStatus` state
+  machine (`DRAFT → STARTED → IN_PROGRESS → COMPLETED → SYNC_PENDING →
+  SYNCED → CLOSED`). This phase only ever writes `STARTED`, `IN_PROGRESS` and
+  `COMPLETED` — a session is created directly at `STARTED` (there is nothing
+  to persist about a session that only exists as an unfilled form on
+  screen), and the remaining three states are reserved for Phase 9's sync
+  engine. The enum carries all seven now so that phase does not have to
+  touch this file to insert a value in the middle of the sequence.
+- **`SessionPrerequisites` and its downloader**: everything one assignment
+  needs to run a session offline — the assessment, its questions, its
+  published answer key (or `null`, captured as fact, not hidden, when none
+  exists yet), and the student roster for each of the assignment's sections
+  — fetched once by `SessionPrerequisitesDownloader` while online and cached
+  locally. This is the one place in the whole feature that calls a
+  network-backed repository (`AssessmentsRepository`/`SchoolsRepository`/
+  `StudentsRepository`); `AssessmentSessionsRepository.startSession` reads
+  only the cache, never those repositories directly — the split that makes
+  "download while you still have signal, then work all day in airplane
+  mode" an architectural property rather than a hope.
+- **Sessions are always local-first, in every environment**: unlike
+  Phases 2-3's schools/students/assessments (Firestore in real environments,
+  in-memory in demo), `assessmentSessionsRepositoryProvider` and
+  `sessionPrerequisitesRepositoryProvider` use a **Hive-backed**
+  implementation in every Firebase-using environment and an in-memory one
+  only in demo/tests — because a session has to be startable and runnable
+  with no network at all, which is not a property Firestore can give it.
+  Both Hive repositories store each entity as a JSON string keyed by its id
+  (`Box<String>`, the same shape `SecureSessionStore` already uses for the
+  cached auth session), so neither needs a generated `TypeAdapter` and
+  neither adds to the `build_runner` surface.
+- **The state machine is enforced identically on both backends**: illegal
+  transitions (skipping `IN_PROGRESS`, moving backward) are rejected with
+  `IllegalStateTransitionFailure` by the in-memory and the Hive repository
+  alike, from the same one-line `index + 1` rule `AssessmentStatus` and
+  `AssignmentStatus` already established in Phase 3.
+- **Screens**: a sessions screen listing a teacher's existing sessions and
+  every assignment they can start a new one from, with a "Download for
+  offline" action per undownloaded assignment and a "Start Section X" action
+  per section once downloaded; and a live session screen (deliberately
+  outside the navigation shell, so a teacher cannot wander off mid-session)
+  that auto-advances a freshly-started session into `IN_PROGRESS` — there is
+  no separate "begin capturing" action until Phase 5 adds OMR capture — and
+  ends it into `COMPLETED` on request.
+- **Tests**: unit tests for the state machine; the downloader (builds a
+  correct `SessionPrerequisites` from real seeded data, handles an
+  assessment with no published key yet as a normal case, fails cleanly for
+  a school that no longer exists); the in-memory repository (state machine
+  enforcement, scope isolation by school and by teacher, refusing to start a
+  session for a section outside the download); and — the two Phase 4 exit
+  criteria proven directly rather than asserted by code inspection — a
+  genuine Hive test that opens a real box on a temp directory, writes a
+  session, fully closes Hive (the same call a killed process leaves
+  undone), reopens against the same directory, and confirms the session
+  and a downloaded `SessionPrerequisites` are both still there and fully
+  usable; and a widget smoke test that downloads, starts, runs and completes
+  a session with the app's connectivity service forced offline for the
+  entire test.
