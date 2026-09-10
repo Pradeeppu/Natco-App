@@ -69,6 +69,13 @@ ios/Runner/GoogleService-Info.plist
 lib/firebase_options.dart
 lib/firebase_options_*.dart
 
+# Release signing key. Unlike Firebase config, this genuinely is a secret:
+# whoever holds it can produce an update Android will accept as coming from
+# this app. Generated once per machine/release pipeline, never committed,
+# never shared over chat or email — see docs/12-deployment.md.
+android/keystore/
+android/key.properties
+
 # Service-account credentials must never enter the mobile project
 # (requirement section 34). This pattern is a backstop, not a policy.
 *service-account*.json
