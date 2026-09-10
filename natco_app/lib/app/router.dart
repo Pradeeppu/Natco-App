@@ -152,8 +152,11 @@ final List<GuardedRoute> kAppRoutes = <GuardedRoute>[
   GuardedRoute(
     path: RoutePaths.omrCapture,
     rule: const RouteAccessRule.requires(Permission.captureOmr),
-    insideShell: true,
-    builder: (_, _) => const OmrCaptureScreen(),
+    // A full-screen task, the same reasoning as a live session: a teacher
+    // should not be able to wander off mid-capture by tapping the bar.
+    builder: (_, GoRouterState state) => OmrCaptureScreen(
+      sessionId: state.uri.queryParameters['sessionId'],
+    ),
   ),
   GuardedRoute(
     path: RoutePaths.omrReview,

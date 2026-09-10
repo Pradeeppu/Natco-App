@@ -158,6 +158,7 @@ void main() {
         RoutePaths.omrReview,
         RoutePaths.assessmentSession,
         RoutePaths.answerKey,
+        RoutePaths.omrCapture,
       ]) {
         final GuardedRoute route = kAppRoutes.firstWhere(
           (GuardedRoute r) => r.path == path,

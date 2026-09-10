@@ -10,8 +10,8 @@ says "this is done", not "this compiles".
 | **2. Master data** | states, districts, clusters, schools, students, CSV import, search, pagination | hierarchy CRUD within scope; duplicate student rejected with a named reason; 2 000-student school scrolls without loading all rows | **complete** |
 | **3. Assessments** | assessments, questions, answer keys (versioned), assignments | key v1 publishes and becomes immutable; a correction produces v2 with a reason and supersedes v1 | **complete** |
 | **4. Offline assessment** | Hive boxes, pre-download, session lifecycle, reconciler | session survives force-stop; airplane-mode run completes end to end | **complete** |
-| 5. OMR capture | camera, gallery, quality gate, durable image write, manual ID entry | image on disk before any processing; each quality failure gives its own message; kill-during-capture loses nothing | next |
-| 6. OMR engine | template JSON, markers, homography, rotation, sampling, classification, confidence | pipeline runs in a worker isolate; golden dataset harness reports measured accuracy; upside-down sheet is detected, not silently inverted | |
+| **5. OMR capture** | camera, gallery, quality gate, durable image write, manual ID entry | image on disk before any processing; each quality failure gives its own message; kill-during-capture loses nothing | **complete** |
+| 6. OMR engine | template JSON, markers, homography, rotation, sampling, classification, confidence | pipeline runs in a worker isolate; golden dataset harness reports measured accuracy; upside-down sheet is detected, not silently inverted | next |
 | 7. Validation | review queue, per-question validation UI, audit trail | machine fields provably unchanged after validation; a submission needing validation cannot reach `SCORED` | |
 | 8. Scoring | scoring engine, results, question-level results | client and server scores agree on the dataset; re-score supersedes instead of mutating | |
 | 9. Synchronization | queue drain, ordered upload, idempotency, retry, conflicts, sync dashboard | kill-during-upload produces exactly one server record; conflict shows both versions and never auto-resolves | |
@@ -279,3 +279,71 @@ Delivered in `natco_app/`:
   usable; and a widget smoke test that downloads, starts, runs and completes
   a session with the app's connectivity service forced offline for the
   entire test.
+
+## Phase 5 — what was built
+
+Delivered in `natco_app/`, scoped to steps 1-2 of the eleven-step pipeline in
+[07-omr-pipeline.md](07-omr-pipeline.md) — decode/downscale and quality
+analysis. Marker detection, alignment, ID decode, bubble sampling,
+classification and confidence all belong to Phase 6, which is why the
+entities below carry no field for any of them: a field nothing yet computes
+is left off rather than filled with a placeholder that looks computed.
+
+- **`ImageQualityAnalyzer`**: a pure-Dart, synchronous analyser (package:image
+  v4) that downscales a captured JPEG to a working size, then measures blur
+  (a Laplacian-style variance proxy), brightness, contrast, and shadow/
+  uneven-lighting deviation across a 4x4 luminance grid, against the
+  `ImageQualityThresholds` Phase 1 already reserved for exactly this split.
+  Each failing metric contributes its own plain-language reason — "the photo
+  is blurred", "too dark", "too bright", "washed out", "part of the sheet is
+  in shadow" — rather than one generic "quality check failed" message.
+- **`OmrProcessingStatus`**: the full 14-state graph from
+  [02-data-model.md](02-data-model.md) §47, of which this phase implements
+  only three edges (`CAPTURED → QUALITY_CHECKED → QUALITY_FAILED`, and back
+  to `QUALITY_CHECKED` on an explicit override) through `OmrStateMachine`,
+  which rejects every other transition — including skipping straight to a
+  later pipeline stage — the same "illegal transition" pattern Phase 3's
+  `AssessmentStatus` and Phase 4's `SessionStatus` already use.
+- **Durable image write, ordered before anything else**:
+  `FileSystemOmrImageStore` writes the captured JPEG to disk the moment it is
+  picked — before quality analysis runs and before any `OmrSubmission`
+  record is created. A submission record is only ever created once the
+  outcome is known (a pass, or an explicit "Use Anyway" override), so a
+  `Retake` leaves an orphaned but harmless file rather than a half-finished
+  record; proven directly by a durability test that writes a file, then
+  opens a *second* store instance against the same directory with no
+  submission ever created, and confirms the bytes are still there.
+- **`OmrSubmission` and `OmrSubmissionsRepository`**: always local-first, in
+  every environment — `HiveOmrSubmissionsRepository` outside demo/tests, the
+  same posture Phase 4 gives sessions, because a capture has to succeed with
+  no network at all. `overrideQualityGate` is the one path that can move a
+  `QUALITY_FAILED` submission back to `QUALITY_CHECKED`, and only Supervisors
+  and Super Admins can call it (docs/04-security-model.md: "the person under
+  time pressure in the classroom is exactly the wrong person" to waive the
+  gate) — a genuine gap in the current permission matrix means Super Admin is
+  the only role today that holds both `captureOmr` and `overrideQualityGate`
+  together, so it is the one account that can exercise the full override
+  flow end to end.
+- **Capture screen**: identify the student and printed OMR id, capture from
+  camera or gallery, see the quality verdict immediately, then Retake or
+  Save (or "Use Anyway" with a required reason, when permitted). Reachable
+  with or without a session in context — with none, it asks the operator to
+  start or resume one rather than guessing which session a sheet belongs to.
+- **A real widget-test-only bug found and fixed**: the "Use Anyway" dialog's
+  confirm button read `reasonController.text` once at dialog-build time and
+  never rebuilt as the operator typed, so it stayed disabled regardless of
+  what was entered. Wrapping the dialog body in a `ListenableBuilder` keyed
+  to the controller fixed it — caught by the smoke test tapping the button
+  after typing a reason and finding the tap silently did nothing.
+- **Tests**: unit tests for the quality analyser (each metric, each failure
+  message, a malformed file treated as a failed decode rather than a crash);
+  the state machine (every legal edge, and that skipping a stage or a no-op
+  transition is rejected); the in-memory submissions repository (creation,
+  the override transition, refusing an override on a submission that is not
+  quality-failed, scope isolation); genuine durability tests for both the
+  image file (survives a fresh store instance with no submission ever
+  created) and the Hive submission record (survives a real close-and-reopen
+  of the box, the same proof Phase 4 uses for sessions); and a widget smoke
+  test driving the real capture screen end to end for both a sharp photo
+  that passes and saves, and a blurred, dark photo that fails with two named
+  reasons and is then saved anyway through the Super Admin override path.

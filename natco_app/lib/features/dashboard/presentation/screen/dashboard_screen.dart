@@ -214,6 +214,13 @@ final class DashboardScreen extends ConsumerWidget {
         permission: Permission.manageAssessments,
       ),
       QuickAction(
+        label: 'Sessions',
+        description: 'Start, monitor or capture for any session',
+        icon: Icons.play_circle_outline,
+        route: RoutePaths.sessions,
+        permission: Permission.conductAssessment,
+      ),
+      QuickAction(
         label: 'Scanner calibration',
         description: 'Measure accuracy and adjust thresholds',
         icon: Icons.tune_outlined,

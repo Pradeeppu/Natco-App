@@ -43,6 +43,12 @@ import 'package:natco_app/features/auth/data/store/session_store.dart';
 import 'package:natco_app/features/auth/domain/repository/auth_repository.dart';
 import 'package:natco_app/features/auth/presentation/controller/session_controller.dart';
 import 'package:natco_app/features/auth/presentation/controller/session_state.dart';
+import 'package:natco_app/features/omr_capture/data/repository/hive_omr_submissions_repository.dart';
+import 'package:natco_app/features/omr_capture/data/repository/in_memory_omr_submissions_repository.dart';
+import 'package:natco_app/features/omr_capture/data/service/image_picker_service.dart';
+import 'package:natco_app/features/omr_capture/data/service/omr_image_store.dart';
+import 'package:natco_app/features/omr_capture/domain/repository/omr_submissions_repository.dart';
+import 'package:natco_app/features/omr_capture/domain/service/image_quality_analyzer.dart';
 import 'package:natco_app/features/schools/data/repository/firestore_schools_repository.dart';
 import 'package:natco_app/features/schools/data/repository/in_memory_schools_repository.dart';
 import 'package:natco_app/features/schools/domain/entity/school.dart';
@@ -50,6 +56,7 @@ import 'package:natco_app/features/schools/domain/repository/schools_repository.
 import 'package:natco_app/features/students/data/repository/firestore_students_repository.dart';
 import 'package:natco_app/features/students/data/repository/in_memory_students_repository.dart';
 import 'package:natco_app/features/students/domain/repository/students_repository.dart';
+import 'package:path_provider/path_provider.dart';
 
 /// The resolved configuration.
 ///
@@ -330,6 +337,45 @@ final Provider<AssessmentSessionsRepository> assessmentSessionsRepositoryProvide
       return HiveAssessmentSessionsRepository(
         hive: ref.watch(hiveProvider),
         idGenerator: ref.watch(idGeneratorProvider),
+        clock: ref.watch(clockProvider),
+        logger: ref.watch(loggerProvider),
+      );
+    });
+
+/// Durable local storage for captured images. Not Firebase-dependent, so
+/// every environment — including demo mode running on a real device — uses
+/// the real filesystem store; only tests override this with one pointed at
+/// a temp directory.
+final Provider<OmrImageStore> omrImageStoreProvider = Provider<OmrImageStore>(
+  (Ref ref) => FileSystemOmrImageStore(
+    rootDirectory: getApplicationDocumentsDirectory,
+  ),
+);
+
+/// Camera/gallery access. Not Firebase-dependent either, for the same reason
+/// as [omrImageStoreProvider] — only tests override this, with a fake that
+/// never touches a platform channel.
+final Provider<ImagePickerService> imagePickerServiceProvider =
+    Provider<ImagePickerService>((Ref ref) => PlatformImagePickerService());
+
+/// Pure, stateless — constructed directly rather than behind an interface
+/// swap, since there is nothing to replace it with yet (docs/07-omr-
+/// pipeline.md §5: a native accelerator arrives behind this same call site
+/// once the Dart pipeline is calibrated).
+final Provider<ImageQualityAnalyzer> imageQualityAnalyzerProvider =
+    Provider<ImageQualityAnalyzer>((Ref ref) => const ImageQualityAnalyzer());
+
+/// Captured OMR submissions. Always local-first, the same reasoning as
+/// [assessmentSessionsRepositoryProvider]: a capture has to succeed with no
+/// network at all.
+final Provider<OmrSubmissionsRepository> omrSubmissionsRepositoryProvider =
+    Provider<OmrSubmissionsRepository>((Ref ref) {
+      final AppConfig config = ref.watch(appConfigProvider);
+      if (!config.environment.usesFirebase) {
+        return InMemoryOmrSubmissionsRepository(clock: ref.watch(clockProvider));
+      }
+      return HiveOmrSubmissionsRepository(
+        hive: ref.watch(hiveProvider),
         clock: ref.watch(clockProvider),
         logger: ref.watch(loggerProvider),
       );

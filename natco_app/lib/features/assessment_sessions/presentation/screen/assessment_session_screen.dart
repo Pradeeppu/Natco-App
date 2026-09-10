@@ -8,11 +8,15 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:natco_app/app/config/service_locator.dart';
+import 'package:natco_app/core/constants/route_paths.dart';
 import 'package:natco_app/core/errors/failure.dart';
 import 'package:natco_app/core/widgets/app_state_views.dart';
 import 'package:natco_app/features/assessment_sessions/domain/entity/assessment_session.dart';
 import 'package:natco_app/features/assessment_sessions/domain/entity/session_status.dart';
 import 'package:natco_app/features/assessment_sessions/presentation/controller/session_controller.dart';
+import 'package:natco_app/features/auth/domain/entity/permission.dart';
+import 'package:natco_app/features/omr_capture/domain/entity/omr_submission.dart';
 
 final class AssessmentSessionScreen extends ConsumerStatefulWidget {
   const AssessmentSessionScreen({required this.sessionId, super.key});
@@ -102,7 +106,16 @@ class _AssessmentSessionScreenState
   }
 }
 
-final class _SessionBody extends StatelessWidget {
+/// Submissions captured for one session so far.
+final capturedSubmissionsProvider =
+    FutureProvider.family<List<OmrSubmission>, String>((Ref ref, String sessionId) async {
+      final result = await ref
+          .read(omrSubmissionsRepositoryProvider)
+          .listForSession(sessionId);
+      return result.valueOrNull ?? const <OmrSubmission>[];
+    });
+
+final class _SessionBody extends ConsumerWidget {
   const _SessionBody({
     required this.session,
     required this.failure,
@@ -114,9 +127,16 @@ final class _SessionBody extends StatelessWidget {
   final VoidCallback onEndSession;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final bool isCompleted = session.status == SessionStatus.completed;
+    final bool canCapture = ref
+        .watch(sessionProvider)
+        .authorization
+        .can(Permission.captureOmr);
+    final AsyncValue<List<OmrSubmission>> captured = ref.watch(
+      capturedSubmissionsProvider(session.sessionId),
+    );
     return ListView(
       padding: const EdgeInsets.all(24),
       children: <Widget>[
@@ -172,6 +192,10 @@ final class _SessionBody extends StatelessWidget {
                     label: 'Ended',
                     value: _formatTime(session.endedAt!),
                   ),
+                _StatRow(
+                  label: 'Sheets captured',
+                  value: '${captured.value?.length ?? 0}',
+                ),
               ],
             ),
           ),
@@ -179,19 +203,35 @@ final class _SessionBody extends StatelessWidget {
         const SizedBox(height: 24),
         if (isCompleted)
           const Text(
-            'This session is complete. Capturing OMR sheets for it will be '
-            'possible once Phase 5 adds OMR capture.',
+            'This session is complete.',
             textAlign: TextAlign.center,
           )
         else ...<Widget>[
           const Text(
             'Running entirely on this device — no connection is needed to '
-            'continue. OMR capture arrives in Phase 5; for now, end the '
-            'session when you are done.',
+            'capture sheets or end the session.',
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 16),
-          FilledButton.icon(
+          if (canCapture) ...<Widget>[
+            FilledButton.icon(
+              onPressed: () async {
+                await context.push(
+                  Uri(
+                    path: RoutePaths.omrCapture,
+                    queryParameters: <String, String>{
+                      'sessionId': session.sessionId,
+                    },
+                  ).toString(),
+                );
+                ref.invalidate(capturedSubmissionsProvider(session.sessionId));
+              },
+              icon: const Icon(Icons.photo_camera_outlined),
+              label: const Text('Capture OMR'),
+            ),
+            const SizedBox(height: 12),
+          ],
+          OutlinedButton.icon(
             onPressed: onEndSession,
             icon: const Icon(Icons.stop_circle_outlined),
             label: const Text('End session'),
