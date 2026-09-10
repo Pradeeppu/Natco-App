@@ -4,8 +4,9 @@ The single entry point: where the build is, how to run it, and what is left.
 The numbered documents that follow this one carry the depth; this one carries
 the state.
 
-**Status: 10 of 12 phases complete and tested.**
-`flutter analyze` clean. **564 of 564 tests passing.**
+**Status: 10 of 12 phases complete and tested; phase 5 partially built.**
+`flutter analyze` clean. **573 of 573 tests passing.** A release APK builds
+successfully end to end — see [§8](#8-building-a-release-apk).
 
 No OMR accuracy figure appears anywhere in this repository, because none has
 been measured yet (Critical Rule 14).
@@ -287,11 +288,42 @@ access — cannot be verified without a device in this environment, so the
 reports screen shows the generated content in-app rather than claim a save
 succeeded that was never actually exercised.
 
+### Phase 5 — OMR capture ⚠️ partial (logic built and tested; the camera
+### screen itself is not)
+
+The two pieces of Phase 5 that are pure logic — no camera, no platform
+channel — are real and tested:
+
+- **`ImageQualityAnalyzer`**: the actual image-quality gate, computing real
+  blur (variance of Laplacian), brightness, contrast (5th-95th percentile
+  luminance spread) and shadow deviation (max 4x4-block deviation) from
+  decoded image bytes, checked against `ImageQualityThresholds` (already
+  defined in phase 1's `scanner_thresholds.dart`). Deliberately does **not**
+  attempt sheet or marker detection — that needs phase 6's homography stage,
+  and the gate has to run *before* that pipeline even starts, on a photo
+  nothing has confirmed is a legible sheet yet. Tested against synthetic
+  bitmaps built in the test itself (a flat gray image, a sharp checkerboard,
+  one deliberately shadowed corner) — no real photo needed to prove the
+  math is right.
+- **`OmrImageWriter`**: writes captured bytes durably to disk
+  (`flush: true`, so the write completes before the call returns) at the
+  path `StoragePaths.omrOriginal` already defines. Takes the documents root
+  directory as a parameter rather than calling `path_provider` itself, so
+  the whole thing is testable with a fake file system — a real caller adds
+  exactly one line, `(await getApplicationDocumentsDirectory()).path`.
+
+**Not built**: the camera capture screen itself (`CameraController`, live
+preview, shutter) and manual OMR-ID entry. Camera integration needs a device
+to initialize and smoke-test — attempting it with zero ability to verify it
+actually works would produce code that *looks* complete but could have
+wiring bugs no widget test would catch, which is worse than being explicit
+that this piece is still open.
+
 ### Preview-only — not yet built behind real data
 
 | Screen | Route | Phase |
 |---|---|---|
-| Camera framing and the image-quality gate | `/omr/capture` | 5 |
+| Camera framing (screen itself; the quality gate behind it is real — see above) | `/omr/capture` | 5 |
 | Scan result with confidence breakdown | `/omr/review/:omrId` | 6 |
 | Scanner calibration and accuracy harness | `/settings/calibration` | 6 |
 
@@ -306,15 +338,14 @@ figure, because none has been measured (Critical Rule 14).
 
 ## 4. What is left
 
-| # | Phase | The gate | Why it's not done here |
+| # | Phase | The gate | Why it's not fully done here |
 |---|---|---|---|
-| 5 | OMR capture | Image on disk before any processing; each quality failure has its own message; a kill mid-capture loses nothing | Needs a camera and a physical device to test against — none available in this environment |
+| 5 | OMR capture | Image on disk before any processing; each quality failure has its own message; a kill mid-capture loses nothing | The quality gate and the durable write are built and tested (see above) — what's left is the camera screen itself, which needs a device to initialize and smoke-test |
 | 6 | OMR engine | Golden-dataset harness reports **measured** accuracy; an upside-down sheet is detected, not silently inverted | Needs real printed, scanned answer sheets with known-correct answers. Critical Rule 14 forbids inventing this number, so there is nothing to build against yet |
 | 12 | Hardening | Rules pass a deny-by-default review; performance budgets met on the reference device | Blocked on a physical device regardless of code state |
 
-Every phase left needs a physical device, real camera hardware, or real
-scanned answer sheets — none of which exist in this environment. There is no
-remaining phase that is simply "more code."
+Every remaining gap needs a physical device, real camera hardware, or real
+scanned answer sheets — none of which exist in this environment.
 
 ---
 
@@ -379,3 +410,32 @@ Honest and current:
    this codebase is a `wireName`-backed enum; `SyncConflictPolicy` checks a
    raw `UserRole` comparison rather than going through the `Authorization`/
    `Permission` mechanism every other gate in the app uses.
+
+---
+
+## 8. Building a release APK
+
+```bash
+flutter build apk --release --dart-define=NATCO_ENV=demo
+```
+
+Verified working end to end on this machine. Two environment-specific fixes
+were needed and are already applied — both are one-time, machine-level
+issues, not anything wrong with the project:
+
+1. **Kotlin's incremental compiler crashes if the pub cache and the project
+   sit on different Windows drive letters** (here: pub cache on `C:\`,
+   project on `D:\`) — it tries to express a plugin's source path relative to
+   the build directory, and a relative path across two drive roots is
+   undefined on Windows. Fixed by disabling incremental compilation
+   (`kotlin.incremental=false` in `android/gradle.properties`); the only cost
+   is a slower from-scratch Kotlin compile, not a functional change.
+2. **`flutter_secure_storage` and `permission_handler_android` both require
+   compiling against Android SDK 37+**, one version ahead of the Flutter
+   template's default (36). Fixed by setting `compileSdk = 37` explicitly in
+   `android/app/build.gradle.kts`.
+
+The resulting APK is signed with the **debug key** — fine to install and
+test today, but not eligible for a Play Store submission, which needs a real
+release signing key (`android/app/build.gradle.kts` still has the template's
+`// TODO: Add your own signing config` in place).
