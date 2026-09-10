@@ -5,9 +5,11 @@ The numbered documents that follow this one carry the depth; this one carries
 the state.
 
 **Status: 10 of 12 phases complete and tested; phase 5's code is complete and
-untested on real hardware; phases 6 and 12 are blocked on a physical device
-and real scanned sheets.**
-`flutter analyze` clean. **576 of 576 tests passing.** A release APK builds
+untested on real hardware; phase 6's engine (marker detection, perspective
+correction, bubble sampling, classification, confidence) is built and tested
+against synthetic sheets but not wired to a real capture, and has no measured
+accuracy; phase 12 is blocked on a physical device.**
+`flutter analyze` clean. **585 of 585 tests passing.** A release APK builds
 and is signed with a **real release key**, verified with `apksigner` — see
 [§8](#8-building-a-release-apk).
 
@@ -50,7 +52,7 @@ mark) — all sharing ids across features so nothing can drift apart.
 
 ```bash
 flutter analyze      # must be clean
-flutter test         # 576 tests, no device and no backend required
+flutter test         # 585 tests, no device and no backend required
 ```
 
 ### Building
@@ -352,6 +354,63 @@ widget test that pumps `/omr/capture?sessionId=...` exercises the real form
 the demo session — that proves the screen renders and does not crash under
 test, not that the camera hardware path works.
 
+### Phase 6 — OMR engine ⚠️ built and tested against synthetic sheets; not wired to a capture; no measured accuracy
+
+The pipeline docs/07-omr-pipeline.md calls for (steps 3-10: marker detection,
+perspective correction, rotation resolution, bubble sampling, answer
+classification, confidence) is real, pure-Dart code
+(`lib/features/omr_processing/domain/service/omr_processor.dart` +
+`domain/entity/omr_template.dart`), tested against sheets the test suite
+draws itself — there is no real scanned sheet anywhere in this repository,
+so nothing here is or claims to be a measured accuracy figure (Critical
+Rule 14). What is proven, by 9 tests:
+
+- **Marker detection**: Otsu-thresholds the working image, finds the
+  largest connected dark blob in each corner's search band, and flags
+  whichever one has a meaningfully lower filled-area/bounding-box ratio as
+  the notched marker. Fewer than four found fails closed with a named
+  reason rather than guessing — proven by a test that erases one corner.
+- **Perspective correction + rotation resolution**: a from-scratch 3x3
+  homography solve (direct linear transform, Gaussian elimination, no
+  external linear-algebra package) rectifies the four detected corners onto
+  a canonical rectangle. The notched marker's position among the four fixes
+  which of four rotations the sheet was photographed in — proven by feeding
+  the *same* sheet through at 0°, 90° and 180° (rotated with `package:
+  image`'s own `copyRotate`, independent of this code) and getting identical
+  answers back each time. This is the exit criterion docs/07 names
+  explicitly: "an upside-down sheet is detected, not silently inverted."
+- **Bubble sampling**: the documented `fillScore = clamp01(meanInkWeight *
+  meanInk + coverageWeight * coverage)` formula, with the local background
+  taken from a surrounding annulus rather than the whole page — the same
+  reasoning `ImageQualityAnalyzer`'s shadow check already uses.
+- **Answer classification**: the literal decision tree from docs/07 Step 9,
+  against `BubbleThresholds`' existing calibratable fields. One honest note
+  left in the code: that document's own worked-example table contains a row
+  its printed decision tree does not actually produce (a `MULTIPLE_MARK`
+  case the table calls `LOW_CONFIDENCE`) — implemented here matching the
+  tree literally, flagged rather than silently resolved either way.
+- **Confidence**: delegates to `ConfidenceWeights.score`, already built and
+  unit-tested in phase 1 — not reimplemented here.
+- **`omrId` decode**: the same sampling and classification applied to the
+  7x10 digit grid; anything short of one high-confidence digit per column
+  makes the whole id `UNREADABLE` rather than guessed, per docs/07 Step 7.
+
+**What this is not**: it is not wired to a real capture. No repository
+method calls `OmrProcessor.process` yet — `OmrValidationRepository` has no
+`processSubmission`-shaped method, so a captured sheet still sits at
+`CAPTURED` with nothing moving it to `PROCESSED`/`NEEDS_VALIDATION`. That
+also means Critical Rule 13's isolate requirement has nothing to wrap yet —
+there is no caller on the UI thread this could block. And there is no
+calibration harness (`tool/omr_eval.dart` from
+docs/10-omr-calibration-testing.md) and no `omr_dataset/` — building either
+against zero real scanned sheets would produce a harness with nothing
+correct to measure, which is exactly the shape of thing Critical Rule 14
+forbids pretending to have. The template geometry
+(`OmrTemplate.natcoV1()`) is a Dart constant, not a parsed
+`assets/omr_templates/natco_v1.json` file — a deliberate, easily-reversed
+scoping choice, not a missing feature; nothing in this environment could
+exercise loading it from an asset bundle any differently.
+
 ### Preview-only — not yet built behind real data
 
 | Screen | Route | Phase |
@@ -373,8 +432,8 @@ figure, because none has been measured (Critical Rule 14).
 | # | Phase | The gate | Why it's not fully done here |
 |---|---|---|---|
 | 5 | OMR capture | Image on disk before any processing; each quality failure has its own message; a kill mid-capture loses nothing | All of it is built and wired to real repositories (see above) — what's left is running it on a real phone once to confirm the camera/permission plumbing behaves the way the code assumes |
-| 6 | OMR engine | Golden-dataset harness reports **measured** accuracy; an upside-down sheet is detected, not silently inverted | Needs real printed, scanned answer sheets with known-correct answers. Critical Rule 14 forbids inventing this number, so there is nothing to build against yet |
-| 12 | Hardening | Rules pass a deny-by-default review; performance budgets met on the reference device | Blocked on a physical device regardless of code state |
+| 6 | OMR engine | Golden-dataset harness reports **measured** accuracy; an upside-down sheet is detected, not silently inverted | The engine itself (marker detection, rectification, rotation resolution, sampling, classification, confidence) is built and tested against synthetic sheets — see above. What's left needs real printed, scanned answer sheets with known-correct answers, which Critical Rule 14 forbids inventing; the pipeline is also not yet wired to a real captured submission |
+| 12 | Hardening | Rules pass a deny-by-default review; performance budgets met on the reference device | Firestore's deny-by-default posture was re-checked this pass (no `if true` grant anywhere; every collection either names a permission or refuses all client access) — that part holds. Performance budgets and an offline soak are blocked on a physical device regardless of code state |
 
 Every remaining gap needs a physical device, real camera hardware, or real
 scanned answer sheets — none of which exist in this environment.
@@ -390,7 +449,10 @@ lib/
 ├── features/
 │   ├── auth · schools · students · users · dashboard      (built)
 │   ├── assessments · assessment_sessions                  (built)
-│   ├── omr_processing · omr_validation · results          (built — phases 7-8)
+│   ├── omr_processing/domain (entities, quality gate)      (built — phases 5/7-8)
+│   ├── omr_processing/domain/service/omr_processor.dart    (built, untested on real
+│   │                                                         data — phase 6 engine)
+│   ├── omr_validation · results                            (built — phases 7-8)
 │   ├── sync                                                (partial — phase 9)
 │   ├── omr_capture                                         (built — phase 5)
 │   ├── omr_processing/presentation (scan-result screen)    (preview — phase 6)
@@ -430,13 +492,23 @@ Enforced in code and in the security rules, not merely written down.
 
 Honest and current:
 
-1. **Sync reconciler's 4th step is deliberately deferred, not missed.**
-   Re-enqueuing an orphaned entity (a non-terminal entity with no queue
-   record) needs phase 5's capture flow to exist first — nothing today
-   writes an entity without also writing its queue entry in the same step, so
-   there is no code path that could produce an orphan to re-enqueue yet. The
-   other three steps (reset stuck `UPLOADING`, reset a crashed `PROCESSING`
-   submission, mark evidence missing) are built and tested.
+1. **No repository in this app enqueues a sync-queue entry yet — checked
+   directly this pass, not assumed.** `SyncQueueRepository.enqueue` has
+   exactly one caller anywhere in `lib/`: itself. `SessionRepositoryImpl`,
+   `OmrValidationRepositoryImpl.createSubmission` and every other write path
+   persist locally but none of them write the matching sync-queue record —
+   so a captured session or sheet sits ready to sync but nothing has told
+   the queue about it. This predates this session's work (it was already
+   true of session/attendance writes before `createSubmission` existed) and
+   is a bigger, pre-existing gap than "phase 5 doesn't exist yet" — wiring
+   every write path to also enqueue is a cross-cutting change across several
+   repositories, out of scope for this pass to do safely without the budget
+   to test each one. The reconciler's 4th step (re-enqueuing an orphaned
+   entity with no queue record) stays undoable for the same reason: nothing
+   yet produces the paired write this step would need to detect divergence
+   in. The other three reconciler steps (reset stuck `UPLOADING`, reset a
+   crashed `PROCESSING` submission, mark evidence missing) are built and
+   tested and do not depend on this gap.
 2. **Fixed since the last pass**: `SyncQueueEntry.operation`/`entityType` are
    now `SyncOperation`/`SyncEntityType` enums, not bare strings; and
    `SyncConflictPolicy` now checks
@@ -445,6 +517,12 @@ Honest and current:
 3. **Phase 5's camera path has never run on a real device.** The code is
    complete and the demo flow is exercised by widget tests, but nobody has
    installed the app on a phone and taken an actual photo through it yet.
+4. **Phase 6's engine has no caller.** `OmrProcessor.process` is built and
+   tested against synthetic sheets, but no repository method invokes it
+   against a real `CAPTURED` submission — so today, a sheet captured through
+   the phase 5 screen sits at `CAPTURED` and nothing moves it forward. That
+   also means Critical Rule 13's isolate requirement has nothing to wrap
+   yet.
 
 ---
 
