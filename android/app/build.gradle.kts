@@ -6,7 +6,12 @@ plugins {
 
 android {
     namespace = "org.natco.natco_app"
-    compileSdk = flutter.compileSdkVersion
+    // Overrides the Flutter template's default (36): flutter_secure_storage
+    // and permission_handler_android both require compiling against 37+.
+    // compileSdk is independent of minSdk/targetSdk below — this only
+    // widens which APIs are available to compile against, it does not
+    // change runtime behavior or which devices the app installs on.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
