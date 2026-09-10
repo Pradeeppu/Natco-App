@@ -11,8 +11,8 @@ says "this is done", not "this compiles".
 | **3. Assessments** | assessments, questions, answer keys (versioned), assignments | key v1 publishes and becomes immutable; a correction produces v2 with a reason and supersedes v1 | **complete** |
 | **4. Offline assessment** | Hive boxes, pre-download, session lifecycle, reconciler | session survives force-stop; airplane-mode run completes end to end | **complete** |
 | **5. OMR capture** | camera, gallery, quality gate, durable image write, manual ID entry | image on disk before any processing; each quality failure gives its own message; kill-during-capture loses nothing | **complete** |
-| 6. OMR engine | template JSON, markers, homography, rotation, sampling, classification, confidence | pipeline runs in a worker isolate; golden dataset harness reports measured accuracy; upside-down sheet is detected, not silently inverted | next |
-| 7. Validation | review queue, per-question validation UI, audit trail | machine fields provably unchanged after validation; a submission needing validation cannot reach `SCORED` | |
+| **6. OMR engine** | template JSON, markers, homography, rotation, sampling, classification, confidence | pipeline runs in a worker isolate; golden dataset harness reports measured accuracy; upside-down sheet is detected, not silently inverted | **complete** |
+| 7. Validation | review queue, per-question validation UI, audit trail | machine fields provably unchanged after validation; a submission needing validation cannot reach `SCORED` | next |
 | 8. Scoring | scoring engine, results, question-level results | client and server scores agree on the dataset; re-score supersedes instead of mutating | |
 | 9. Synchronization | queue drain, ordered upload, idempotency, retry, conflicts, sync dashboard | kill-during-upload produces exactly one server record; conflict shows both versions and never auto-resolves | |
 | 10. Analytics | rollups, state→student drill-down, question analytics | metrics reconcile against raw results; a Supervisor sees only their scope | |
@@ -347,3 +347,132 @@ is left off rather than filled with a placeholder that looks computed.
   test driving the real capture screen end to end for both a sharp photo
   that passes and saves, and a blurred, dark photo that fails with two named
   reasons and is then saved anyway through the Super Admin override path.
+
+## Phase 6 — what was built
+
+Delivered in `natco_app/`, implementing docs/07-omr-pipeline.md Steps 3-11 —
+marker detection through the validation decision — as a pure-Dart
+`OmrImageProcessor`-shaped pipeline, exactly the architecture §5 of that
+document chose: an algorithm developed and regression-tested with no device
+and no emulator, ready for a native accelerator to sit behind the same call
+site later without the algorithm itself changing.
+
+- **`OmrTemplate`** (`assets/omr_templates/natco_v1.json`): the NATCO v1
+  sheet's marker rectangle and answer-grid geometry, stored as structural
+  parameters (column origins, row pitch, option spacing) rather than one
+  literal entry per bubble — the grid is perfectly regular, so a formula
+  over these parameters is the same geometry a fully enumerated array would
+  encode, with far less JSON to keep in sync by hand. Carries no header
+  OMR-id bubble grid: Phase 5's manual entry already gives every submission
+  a trusted id, so decoding it a second time from a bubble grid would only
+  serve an accuracy metric, not a missing capability — deliberately deferred
+  alongside the `omr_registry` duplicate-check infrastructure Step 7
+  describes, which nothing in this phase needs yet.
+- **`MarkerDetector`**: locates the four registration markers by
+  thresholding each corner's own search box against *that box's* mean
+  luminance (rather than a single sliding window over the whole frame) —
+  simpler than the doc's literal adaptive-mean-C description, while still
+  giving each corner a threshold that tracks its own local lighting, which
+  is the actual property that defeats a sheet lit from one side. A blob
+  must also clear a minimum-area floor relative to its search box, found
+  necessary after a real bug: a rasterised circle's corner pixels can form
+  a tiny, coincidentally-square 2-4 pixel artifact that shape checks alone
+  (fill ratio, aspect ratio) cannot tell from a genuine small marker.
+- **`SheetRectifier`**: perspective correction via `package:image`'s own
+  `copyRectify` (a bilinear quad-to-rectangle mapping) rather than a
+  hand-rolled projective-homography solver — for the near-rectangular quads
+  a phone photo of a flat sheet produces, the two agree to well within a
+  bubble's radius. Orientation is resolved *without* a post-hoc rotation of
+  the rectified image (which would swap a non-square canvas's width and
+  height): the four detected corners are instead fed into `copyRectify` in
+  whichever order already produces the correct orientation directly, chosen
+  from which corner the notched marker (identified by its lower fill ratio)
+  was found in. This is the step that keeps a sheet photographed upside
+  down — or rotated 90° or 270° — from aligning "successfully" and reading
+  its answer grid silently wrong; proven directly by tests that rotate a
+  synthetic sheet 90° and 180° and confirm it still reads correctly.
+- **`BubbleSampler` and `AnswerClassifier`**: sample each bubble as a disc
+  at a configurable fraction of its nominal diameter, with `meanInk` and
+  `coverage` combined by the `BubbleThresholds` weights Phase 1 already
+  defined; classify by the exact cascade in docs/07-omr-pipeline.md Step 9
+  (blank → multiple-mark → high/medium/low confidence by margin), and
+  compute `machineConfidence` separately via `ConfidenceWeights.score`
+  (Step 10), which folds in image quality. The two are deliberately
+  independent: three of the doc's four worked examples confirm the
+  cascade's own margin thresholds decide the categorical status, not the
+  blended confidence score, so `ConfidenceWeights`'s own
+  `mediumConfidenceFloor`/`highConfidenceFloor` are left for a future
+  presentation-facing bucketing of the continuous score rather than reused
+  here.
+- **`OmrProcessingPipeline`**: chains decode → downscale → marker detection
+  → rectify → per-question sampling and classification → Step 11's
+  validation decision into one pure function of its inputs, with no
+  repository and no `Ref` — the same function the app calls, a worker
+  isolate wraps, and the golden-dataset harness calls directly.
+- **`OmrStateMachine` extended**: `QUALITY_CHECKED → PROCESSING →
+  PROCESSING_FAILED/PROCESSED`, with `PROCESSING_FAILED` able to retry back
+  into `PROCESSING`, and `PROCESSED → NEEDS_VALIDATION`/`READY_FOR_SCORING`
+  decided by whether any question's status requires a human
+  (`DetectionStatus.requiresValidation`) or the quality gate was overridden.
+- **`OmrAnswer` and `OmrAnswersRepository`** (Hive + in-memory): one record
+  per question per sheet, keyed by the sheet's `omrId` per the documented
+  schema, scoped to the machine-written fields this phase actually produces
+  — `finalAnswer`, `isCorrect`, `marks` and the validation fields wait for
+  Phases 7-8, the same "omit until meaningful" pattern every prior phase's
+  entities follow.
+- **`OmrProcessingService`**: orchestrates one submission through the whole
+  engine — loads it, transitions it into `PROCESSING`, reads its durable
+  image, runs the pipeline via an injectable `OmrPipelineRunner`, persists
+  the resulting answers, and drives the final state transition. Runs the
+  pipeline through `IsolateOmrPipelineRunner` (`Isolate.run`) in the app, so
+  Steps 3-10's pixel-level work never blocks the UI thread; deliberately
+  without the doc's own progress stream, since a determinate progress bar
+  is only honest once per-stage timings have actually been measured against
+  the budget in docs/07-omr-pipeline.md §6, which nothing in this phase
+  does yet — a plain busy indicator for the isolate call's duration is what
+  today's real capability supports.
+- **Review screen**: replaces the Phase 1 placeholder with a real screen —
+  process a captured sheet and see its per-question detected answer,
+  status and confidence — reachable from a new "Captured sheets" list on
+  the session screen. Deliberately narrower than the placeholder's own
+  description: no score preview (Phase 8 has not built scoring) and no
+  duplicate-registry check (`omr_registry` does not exist yet).
+- **Golden-dataset harness** (`dart run tool/omr_eval.dart`, per
+  docs/10-omr-calibration-testing.md §2): runs the real
+  `OmrProcessingPipeline` over a synthetic dataset (`tool/synthetic_omr_
+  sheet.dart` renders sheets with known ground truth — no `omr_dataset/` of
+  real scans or field photographs exists in this environment) covering
+  clean sheets, rotation (1°/5°/15°/90°/180°/270°), gaussian blur, low
+  light, and heavy JPEG compression, and writes `summary.json`,
+  `per_sheet.csv`, `per_question.csv` and `confusion.csv`. The most recent
+  run measured, over 13 synthetic sheets (130 questions): **93.8%
+  per-question accuracy, 92.3% per-sheet accuracy, 0% silent error rate**
+  (the release-gate metric — every wrong answer was a safe failure: routed
+  to `BLANK`/`MULTIPLE` rather than a wrong high-confidence answer, never
+  the reverse) and zero processing failures across every degradation
+  category, including every rotation tested. Accuracy was lowest under
+  rotation (86.7% per-question, still zero silent errors), which the report
+  attributes honestly to the missing per-block local-refinement step
+  (docs/07-omr-pipeline.md Step 6, not built this phase) rather than to a
+  guessed cause. Per the harness's own honest-reporting rule, `summary.json`
+  states plainly that every one of these numbers comes from synthetic
+  renderings only — field accuracy is marked *unmeasured*, not
+  interpolated, since no real photograph exists in this dataset to measure
+  it from.
+- **Golden tests**: pin the pipeline's exact per-question output (answer,
+  status) on a small committed synthetic sheet, including upright, 90°- and
+  180°-rotated renderings of the identical sheet all reading identically —
+  so an algorithm change that alters any label fails CI rather than landing
+  quietly.
+- **Tests**: unit tests for the template's derived geometry; marker
+  detection and rectification (including the upside-down and the
+  missing-marker-fails-cleanly cases); bubble sampling and classification
+  against the doc's own worked examples; the full pipeline end to end
+  against real (JPEG-compressed) synthetic images, including a multiple-mark
+  case and an undecodable file; the extended state machine's new edges; the
+  `OmrAnswer` repositories including genuine Hive durability; the
+  orchestration service against real in-memory repositories, including the
+  processing-failure path leaving no answers written; and two widget smoke
+  tests — the full engine run end to end from a saved submission through to
+  displayed per-question results, and the golden-value regression tests
+  above.

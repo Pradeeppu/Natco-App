@@ -19,6 +19,7 @@ import 'package:natco_app/features/auth/domain/entity/access_scope.dart';
 import 'package:natco_app/features/omr_capture/domain/entity/omr_processing_status.dart';
 import 'package:natco_app/features/omr_capture/domain/entity/omr_submission.dart';
 import 'package:natco_app/features/omr_capture/domain/entity/quality_override.dart';
+import 'package:natco_app/features/omr_capture/domain/entity/validation_status.dart';
 import 'package:natco_app/features/omr_capture/domain/repository/omr_submissions_repository.dart';
 import 'package:natco_app/features/omr_capture/domain/service/omr_state_machine.dart';
 
@@ -60,6 +61,19 @@ final class HiveOmrSubmissionsRepository implements OmrSubmissionsRepository {
       }, onError: _mapError);
 
   @override
+  Future<Result<OmrSubmission?>> getSubmissionByOmrId(String omrId) =>
+      guardAsync(() async {
+        final Box<String> box = await _openBox();
+        for (final String raw in box.values) {
+          final OmrSubmission? submission = _decode(raw);
+          if (submission?.omrId == omrId) {
+            return submission;
+          }
+        }
+        return null;
+      }, onError: _mapError);
+
+  @override
   Future<Result<OmrSubmission>> createSubmission(OmrSubmission submission) =>
       _write(submission);
 
@@ -92,6 +106,41 @@ final class HiveOmrSubmissionsRepository implements OmrSubmissionsRepository {
     final OmrSubmission updated = existing.copyWith(
       processingStatus: transition.valueOrNull!,
       qualityOverride: override,
+      updatedAt: _clock.nowUtc(),
+    );
+    return _write(updated);
+  }
+
+  @override
+  Future<Result<OmrSubmission>> transitionProcessingStatus(
+    String submissionId, {
+    required OmrProcessingStatus to,
+    ValidationStatus? validationStatus,
+  }) async {
+    final Result<OmrSubmission?> current = await getSubmission(submissionId);
+    if (current.isFailure) {
+      return err(current.failureOrNull!);
+    }
+    final OmrSubmission? existing = current.valueOrNull;
+    if (existing == null) {
+      return err(
+        NotFoundFailure(
+          userMessage: 'That submission could not be found.',
+          entityType: 'omr_submission',
+          entityId: submissionId,
+        ),
+      );
+    }
+    final Result<OmrProcessingStatus> transition = _stateMachine.transition(
+      existing.processingStatus,
+      to,
+    );
+    if (transition.isFailure) {
+      return err(transition.failureOrNull!);
+    }
+    final OmrSubmission updated = existing.copyWith(
+      processingStatus: transition.valueOrNull!,
+      validationStatus: validationStatus,
       updatedAt: _clock.nowUtc(),
     );
     return _write(updated);

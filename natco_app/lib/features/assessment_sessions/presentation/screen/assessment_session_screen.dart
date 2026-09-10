@@ -130,10 +130,9 @@ final class _SessionBody extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final bool isCompleted = session.status == SessionStatus.completed;
-    final bool canCapture = ref
-        .watch(sessionProvider)
-        .authorization
-        .can(Permission.captureOmr);
+    final authorization = ref.watch(sessionProvider).authorization;
+    final bool canCapture = authorization.can(Permission.captureOmr);
+    final bool canReview = authorization.can(Permission.reviewScanQuality);
     final AsyncValue<List<OmrSubmission>> captured = ref.watch(
       capturedSubmissionsProvider(session.sessionId),
     );
@@ -200,6 +199,25 @@ final class _SessionBody extends ConsumerWidget {
             ),
           ),
         ),
+        if (canReview && (captured.value?.isNotEmpty ?? false)) ...<Widget>[
+          const SizedBox(height: 20),
+          Text('Captured sheets', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          for (final OmrSubmission submission in captured.value!)
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                title: Text('Sheet ${submission.omrId}'),
+                subtitle: Text(submission.processingStatus.wireName),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.push(
+                  RoutePaths.of(RoutePaths.omrReview, <String, String>{
+                    'omrId': submission.omrId,
+                  }),
+                ),
+              ),
+            ),
+        ],
         const SizedBox(height: 24),
         if (isCompleted)
           const Text(

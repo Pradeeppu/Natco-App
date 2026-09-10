@@ -85,7 +85,39 @@ void main() {
 
     final forSession = await repo.listForSession('session-1');
     expect(forSession.valueOrNull, hasLength(1));
+
+    final byOmrId = await repo.getSubmissionByOmrId('0001827');
+    expect(byOmrId.valueOrNull?.submissionId, 'sub-1');
+
+    final missing = await repo.getSubmissionByOmrId('no-such-omr-id');
+    expect(missing.valueOrNull, isNull);
   });
+
+  test(
+    'transitionProcessingStatus moves quality-checked to processing',
+    () async {
+      final submission = buildSubmission(
+        submissionId: 'sub-1',
+        schoolId: 'sch1',
+        clusterId: 'cl1',
+        districtId: 'di1',
+        stateId: 'st1',
+      );
+      await repo.createSubmission(submission);
+
+      final result = await repo.transitionProcessingStatus(
+        'sub-1',
+        to: OmrProcessingStatus.processing,
+      );
+      expect(result.valueOrNull?.processingStatus, OmrProcessingStatus.processing);
+
+      final illegal = await repo.transitionProcessingStatus(
+        'sub-1',
+        to: OmrProcessingStatus.scored,
+      );
+      expect(illegal.failureOrNull, isA<IllegalStateTransitionFailure>());
+    },
+  );
 
   test('overrideQualityGate moves a failed submission back to quality-checked', () async {
     final submission = buildSubmission(

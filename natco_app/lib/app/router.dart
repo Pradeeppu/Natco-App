@@ -161,7 +161,8 @@ final List<GuardedRoute> kAppRoutes = <GuardedRoute>[
   GuardedRoute(
     path: RoutePaths.omrReview,
     rule: const RouteAccessRule.requires(Permission.reviewScanQuality),
-    builder: (_, _) => const OmrReviewScreen(),
+    builder: (_, GoRouterState state) =>
+        OmrReviewScreen(omrId: state.pathParameters['omrId']!),
   ),
   GuardedRoute(
     path: RoutePaths.omrValidationQueue,

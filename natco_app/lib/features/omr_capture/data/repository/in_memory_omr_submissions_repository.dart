@@ -9,6 +9,7 @@ import 'package:natco_app/features/auth/domain/entity/access_scope.dart';
 import 'package:natco_app/features/omr_capture/domain/entity/omr_processing_status.dart';
 import 'package:natco_app/features/omr_capture/domain/entity/omr_submission.dart';
 import 'package:natco_app/features/omr_capture/domain/entity/quality_override.dart';
+import 'package:natco_app/features/omr_capture/domain/entity/validation_status.dart';
 import 'package:natco_app/features/omr_capture/domain/repository/omr_submissions_repository.dart';
 import 'package:natco_app/features/omr_capture/domain/service/omr_state_machine.dart';
 
@@ -32,6 +33,14 @@ final class InMemoryOmrSubmissionsRepository implements OmrSubmissionsRepository
   @override
   Future<Result<OmrSubmission?>> getSubmission(String submissionId) async =>
       ok(_submissions[submissionId]);
+
+  @override
+  Future<Result<OmrSubmission?>> getSubmissionByOmrId(String omrId) async => ok(
+    _submissions.values.cast<OmrSubmission?>().firstWhere(
+      (OmrSubmission? s) => s!.omrId == omrId,
+      orElse: () => null,
+    ),
+  );
 
   @override
   Future<Result<OmrSubmission>> createSubmission(
@@ -66,6 +75,38 @@ final class InMemoryOmrSubmissionsRepository implements OmrSubmissionsRepository
     final OmrSubmission updated = existing.copyWith(
       processingStatus: transition.valueOrNull!,
       qualityOverride: override,
+      updatedAt: _clock.nowUtc(),
+    );
+    _submissions[submissionId] = updated;
+    return ok(updated);
+  }
+
+  @override
+  Future<Result<OmrSubmission>> transitionProcessingStatus(
+    String submissionId, {
+    required OmrProcessingStatus to,
+    ValidationStatus? validationStatus,
+  }) async {
+    final OmrSubmission? existing = _submissions[submissionId];
+    if (existing == null) {
+      return err(
+        NotFoundFailure(
+          userMessage: 'That submission could not be found.',
+          entityType: 'omr_submission',
+          entityId: submissionId,
+        ),
+      );
+    }
+    final Result<OmrProcessingStatus> transition = _stateMachine.transition(
+      existing.processingStatus,
+      to,
+    );
+    if (transition.isFailure) {
+      return err(transition.failureOrNull!);
+    }
+    final OmrSubmission updated = existing.copyWith(
+      processingStatus: transition.valueOrNull!,
+      validationStatus: validationStatus,
       updatedAt: _clock.nowUtc(),
     );
     _submissions[submissionId] = updated;

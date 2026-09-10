@@ -58,6 +58,18 @@ final class ImageQualityReport {
   /// bare "quality check failed" (requirement section 40).
   final List<String> failureReasons;
 
+  /// A single 0.0-1.0 summary, folded into confidence by
+  /// `ConfidenceWeights.score` (docs/07-omr-pipeline.md Step 10).
+  ///
+  /// The mean of blur and contrast only: both scale smoothly with how
+  /// legible a pencil mark actually is, so a sharper or higher-contrast
+  /// photo should smoothly raise confidence. Brightness and shadow
+  /// deviation are deliberately left out — they already gate capture as
+  /// hard pass/fail thresholds in `ImageQualityThresholds`, not smooth
+  /// scales, so remixing them here would double-count the same signal.
+  double get overallScore =>
+      (blurScore.clamp(0.0, 1.0) + contrastScore.clamp(0.0, 1.0)) / 2;
+
   Map<String, Object?> toJson() => <String, Object?>{
     'blurScore': blurScore,
     'brightnessScore': brightnessScore,

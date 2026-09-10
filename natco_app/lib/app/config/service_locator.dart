@@ -49,6 +49,13 @@ import 'package:natco_app/features/omr_capture/data/service/image_picker_service
 import 'package:natco_app/features/omr_capture/data/service/omr_image_store.dart';
 import 'package:natco_app/features/omr_capture/domain/repository/omr_submissions_repository.dart';
 import 'package:natco_app/features/omr_capture/domain/service/image_quality_analyzer.dart';
+import 'package:natco_app/features/omr_processing/data/repository/hive_omr_answers_repository.dart';
+import 'package:natco_app/features/omr_processing/data/repository/in_memory_omr_answers_repository.dart';
+import 'package:natco_app/features/omr_processing/data/service/omr_pipeline_runner.dart';
+import 'package:natco_app/features/omr_processing/data/service/omr_template_loader.dart';
+import 'package:natco_app/features/omr_processing/domain/entity/omr_template.dart';
+import 'package:natco_app/features/omr_processing/domain/repository/omr_answers_repository.dart';
+import 'package:natco_app/features/omr_processing/domain/service/omr_processing_service.dart';
 import 'package:natco_app/features/schools/data/repository/firestore_schools_repository.dart';
 import 'package:natco_app/features/schools/data/repository/in_memory_schools_repository.dart';
 import 'package:natco_app/features/schools/domain/entity/school.dart';
@@ -378,6 +385,52 @@ final Provider<OmrSubmissionsRepository> omrSubmissionsRepositoryProvider =
         hive: ref.watch(hiveProvider),
         clock: ref.watch(clockProvider),
         logger: ref.watch(loggerProvider),
+      );
+    });
+
+/// Per-question machine answers. Always local-first, the same reasoning as
+/// [omrSubmissionsRepositoryProvider].
+final Provider<OmrAnswersRepository> omrAnswersRepositoryProvider =
+    Provider<OmrAnswersRepository>((Ref ref) {
+      final AppConfig config = ref.watch(appConfigProvider);
+      if (!config.environment.usesFirebase) {
+        return InMemoryOmrAnswersRepository();
+      }
+      return HiveOmrAnswersRepository(
+        hive: ref.watch(hiveProvider),
+        logger: ref.watch(loggerProvider),
+      );
+    });
+
+/// The NATCO v1 sheet geometry (docs/07-omr-pipeline.md §1). A
+/// [FutureProvider] rather than a plain [Provider]: loading it is one
+/// `rootBundle` read, done once and cached for the app's lifetime — every
+/// consumer just awaits the same future rather than re-reading the asset.
+final FutureProvider<OmrTemplate> omrTemplateProvider =
+    FutureProvider<OmrTemplate>(
+      (Ref ref) => const OmrTemplateLoader().load(kNatcoV1TemplateAsset),
+    );
+
+/// Runs the engine itself. A real isolate in every environment except tests
+/// that explicitly override this with a same-isolate runner — see
+/// [OmrPipelineRunner]'s own doc comment for why a widget test needs that
+/// substitution and a plain repository test does not.
+final Provider<OmrPipelineRunner> omrPipelineRunnerProvider =
+    Provider<OmrPipelineRunner>((Ref ref) => const IsolateOmrPipelineRunner());
+
+/// Orchestrates one submission through the detection engine. A
+/// [FutureProvider] because building it needs [omrTemplateProvider]'s
+/// asset load to have finished first.
+final FutureProvider<OmrProcessingService> omrProcessingServiceProvider =
+    FutureProvider<OmrProcessingService>((Ref ref) async {
+      final OmrTemplate template = await ref.watch(omrTemplateProvider.future);
+      return OmrProcessingService(
+        submissions: ref.watch(omrSubmissionsRepositoryProvider),
+        answers: ref.watch(omrAnswersRepositoryProvider),
+        imageStore: ref.watch(omrImageStoreProvider),
+        idGenerator: ref.watch(idGeneratorProvider),
+        template: template,
+        runner: ref.watch(omrPipelineRunnerProvider),
       );
     });
 

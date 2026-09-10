@@ -1,0 +1,22 @@
+{
+  "templateVersion": 1,
+  "pageWidthMm": 210.0,
+  "pageHeightMm": 297.0,
+  "markerSizeMm": 12.0,
+  "markerInsetMm": 10.0,
+  "notchCorner": "bottomLeft",
+  "rectifiedWidthPx": 900,
+  "rectifiedHeightPx": 1340,
+  "answerGrid": {
+    "bubbleDiameterMm": 5.0,
+    "bubblePitchMm": 9.0,
+    "optionLabels": ["A", "B", "C", "D"],
+    "optionSpacingMm": 7.0,
+    "columns": [
+      { "startQuestionNumber": 1, "questionCount": 25, "originXMm": 28.0, "originYMm": 50.0 },
+      { "startQuestionNumber": 26, "questionCount": 25, "originXMm": 74.0, "originYMm": 50.0 },
+      { "startQuestionNumber": 51, "questionCount": 25, "originXMm": 120.0, "originYMm": 50.0 },
+      { "startQuestionNumber": 76, "questionCount": 25, "originXMm": 166.0, "originYMm": 50.0 }
+    ]
+  }
+}
