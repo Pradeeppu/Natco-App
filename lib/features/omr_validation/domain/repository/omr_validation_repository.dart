@@ -18,6 +18,7 @@ library;
 import 'package:natco_app/core/pagination/page.dart';
 import 'package:natco_app/core/utils/result.dart';
 import 'package:natco_app/features/auth/domain/entity/access_scope.dart';
+import 'package:natco_app/features/omr_processing/domain/entity/image_quality_report.dart';
 import 'package:natco_app/features/omr_processing/domain/entity/omr_answer.dart';
 import 'package:natco_app/features/omr_processing/domain/entity/omr_submission.dart';
 import 'package:natco_app/features/omr_validation/domain/entity/omr_validation_record.dart';
@@ -112,4 +113,37 @@ abstract interface class OmrValidationRepository {
   /// Phase 6's pipeline restarts from a clean `CAPTURED` state rather than
   /// resuming a partial one that does not exist.
   Future<Result<OmrSubmission>> resetToCaptured(String omrId);
+
+  /// Creates a submission for a freshly captured sheet.
+  ///
+  /// [omrId] must never have been used before — enforced by the data source
+  /// (the `omr_registry` guard document on Firestore, an equivalent reuse
+  /// check for the in-memory backend), not by this layer, exactly as
+  /// [OmrSubmission]'s own doc comment describes (Critical Rule 7). The new
+  /// submission starts `CAPTURED` / `ValidationStatus.notRequired` — phase 6
+  /// processing is what moves it forward from there — and [originalImagePath]
+  /// must already point at a file durably written to disk (docs/06 §1: the
+  /// evidence exists before this call, this method never writes image bytes
+  /// itself).
+  ///
+  /// [qualityOverrideBy]/[qualityOverrideReason] are non-null only when a
+  /// capturer chose "Use anyway" over a failed [imageQuality] verdict; that
+  /// choice is audited separately from the capture itself so a reviewer can
+  /// find every override without reading every capture.
+  Future<Result<OmrSubmission>> createSubmission({
+    required String omrId,
+    required String sessionId,
+    required String assessmentId,
+    String? studentId,
+    required String schoolId,
+    required String clusterId,
+    required String districtId,
+    required String stateId,
+    required String capturedBy,
+    required String actorRole,
+    required String originalImagePath,
+    required ImageQualityReport imageQuality,
+    String? qualityOverrideBy,
+    String? qualityOverrideReason,
+  });
 }

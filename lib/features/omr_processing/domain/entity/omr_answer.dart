@@ -149,27 +149,28 @@ final class OmrAnswer {
       return null;
     }
     final Object? rawScores = json['optionScores'];
+    final Object? rawConfidence = json['machineConfidence'];
     final Object? validatedAt = json['validatedAt'];
+    
+    if (rawScores is! Map || rawConfidence is! num) {
+      return null;
+    }
+
     return OmrAnswer(
       omrAnswerId: omrAnswerId,
       omrId: omrId,
       questionNumber: questionNumber,
-      optionScores: rawScores is Map
-          ? rawScores.map(
-              (Object? k, Object? v) => MapEntry(
-                k.toString(),
-                switch (v) {
-                  final num value => value.toDouble(),
-                  _ => 0.0,
-                },
-              ),
-            )
-          : const <String, double>{},
+      optionScores: rawScores.map(
+        (Object? k, Object? v) => MapEntry(
+          k.toString(),
+          switch (v) {
+            final num value => value.toDouble(),
+            _ => 0.0,
+          },
+        ),
+      ),
       machineAnswer: json['machineAnswer'] as String?,
-      machineConfidence: switch (json['machineConfidence']) {
-        final num value => value.toDouble(),
-        _ => 0,
-      },
+      machineConfidence: rawConfidence.toDouble(),
       machineStatus: machineStatus,
       finalAnswer: json['finalAnswer'] as String?,
       finalAnswerSource: AnswerSource.tryFromWireName(

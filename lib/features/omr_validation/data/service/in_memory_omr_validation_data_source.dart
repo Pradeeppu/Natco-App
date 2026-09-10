@@ -199,4 +199,25 @@ final class InMemoryOmrValidationDataSource implements OmrValidationDataSource {
     _submissions[submission.omrId] = submission;
     return ok(submission);
   }
+
+  @override
+  Future<Result<OmrSubmission>> createSubmission(
+    OmrSubmission submission,
+  ) async {
+    // Stands in for the `omr_registry` guard document Firestore uses — same
+    // rule, an omrId is never reused, checked here instead of via a
+    // transaction since this backend has no separate registry collection.
+    if (_submissions.containsKey(submission.omrId)) {
+      return err(
+        DuplicateFailure(
+          userMessage: 'This OMR ID has already been captured.',
+          entityType: 'omr_submission',
+          entityId: submission.omrId,
+        ),
+      );
+    }
+    _submissions[submission.omrId] = submission;
+    _answers.putIfAbsent(submission.omrId, () => <OmrAnswer>[]);
+    return ok(submission);
+  }
 }

@@ -13,6 +13,7 @@ import 'package:natco_app/core/utils/clock.dart';
 import 'package:natco_app/core/utils/id_generator.dart';
 import 'package:natco_app/core/utils/result.dart';
 import 'package:natco_app/features/auth/domain/entity/access_scope.dart';
+import 'package:natco_app/features/omr_processing/domain/entity/image_quality_report.dart';
 import 'package:natco_app/features/omr_processing/domain/entity/omr_answer.dart';
 import 'package:natco_app/features/omr_processing/domain/entity/omr_submission.dart';
 import 'package:natco_app/features/omr_validation/data/service/omr_validation_data_source.dart';
@@ -292,5 +293,99 @@ final class OmrValidationRepositoryImpl implements OmrValidationRepository {
         updatedAt: _clock.nowUtc(),
       ),
     );
+  }
+
+  @override
+  Future<Result<OmrSubmission>> createSubmission({
+    required String omrId,
+    required String sessionId,
+    required String assessmentId,
+    String? studentId,
+    required String schoolId,
+    required String clusterId,
+    required String districtId,
+    required String stateId,
+    required String capturedBy,
+    required String actorRole,
+    required String originalImagePath,
+    required ImageQualityReport imageQuality,
+    String? qualityOverrideBy,
+    String? qualityOverrideReason,
+  }) async {
+    final DateTime now = _clock.nowUtc();
+    final OmrSubmission submission = OmrSubmission(
+      omrId: omrId,
+      submissionId: _idGenerator.newId(),
+      sessionId: sessionId,
+      assessmentId: assessmentId,
+      studentId: studentId,
+      schoolId: schoolId,
+      clusterId: clusterId,
+      districtId: districtId,
+      stateId: stateId,
+      capturedBy: capturedBy,
+      capturedAt: now,
+      deviceId: _deviceInfo.deviceId,
+      originalImagePath: originalImagePath,
+      imageQuality: imageQuality,
+      qualityOverrideBy: qualityOverrideBy,
+      qualityOverrideReason: qualityOverrideReason,
+      // Phase 6's pipeline is what moves this forward; a fresh capture always
+      // starts here regardless of the quality verdict — even an overridden
+      // failure still needs processing run against it.
+      processingStatus: OmrProcessingStatus.captured,
+      validationStatus: ValidationStatus.notRequired,
+      createdAt: now,
+      updatedAt: now,
+    );
+
+    final Result<OmrSubmission> result = await _dataSource.createSubmission(
+      submission,
+    );
+    if (result.isFailure) {
+      return result;
+    }
+
+    await _auditSink.record(
+      AuditEvent(
+        auditId: _idGenerator.newId(),
+        userId: capturedBy,
+        role: actorRole,
+        action: AuditAction.omrCaptured,
+        entityType: 'omr_submission',
+        entityId: omrId,
+        timestamp: now,
+        deviceId: _deviceInfo.deviceId,
+        appVersion: _deviceInfo.appVersion,
+        // Quality verdict only — never studentId (Critical Rule 11: no
+        // student identifier in an audit entry).
+        newValue: <String, Object?>{
+          'assessmentId': assessmentId,
+          'qualityVerdict': imageQuality.verdict.wireName,
+        },
+      ),
+    );
+
+    if (qualityOverrideBy != null) {
+      await _auditSink.record(
+        AuditEvent(
+          auditId: _idGenerator.newId(),
+          userId: qualityOverrideBy,
+          role: actorRole,
+          action: AuditAction.omrQualityOverridden,
+          entityType: 'omr_submission',
+          entityId: omrId,
+          timestamp: now,
+          deviceId: _deviceInfo.deviceId,
+          appVersion: _deviceInfo.appVersion,
+          newValue: <String, Object?>{
+            'qualityVerdict': imageQuality.verdict.wireName,
+            'reason': qualityOverrideReason,
+          },
+        ),
+      );
+    }
+
+    return result;
   }
 }

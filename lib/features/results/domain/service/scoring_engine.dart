@@ -126,12 +126,19 @@ abstract final class ScoringEngine {
       final double penalty = assessment.negativeMarkPerWrongAnswer;
       totalMarks += questionMarks;
 
-      machineMarksObtained += _markFor(
-        answer: answer.machineAnswer,
-        correctOption: entry.correctOption,
-        questionMarks: questionMarks,
-        penalty: penalty,
-      );
+      final String? machineAnswer = answer.machineAnswer;
+      final bool isMachineBlank =
+          machineAnswer == null || machineAnswer == kBlankDecision;
+      final bool isMachineMultiple = machineAnswer == kMultipleDecision;
+
+      if (!isMachineBlank && !isMachineMultiple) {
+        machineMarksObtained += _markFor(
+          answer: machineAnswer,
+          correctOption: entry.correctOption,
+          questionMarks: questionMarks,
+          penalty: penalty,
+        );
+      }
       if (answer.machineAnswer != answer.finalAnswer) {
         discrepant.add(answer.questionNumber);
       }

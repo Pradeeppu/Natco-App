@@ -47,4 +47,11 @@ abstract interface class OmrValidationDataSource {
   Future<Result<void>> appendValidationRecord(OmrValidationRecord record);
 
   Future<Result<OmrSubmission>> saveSubmission(OmrSubmission submission);
+
+  /// Creates a new submission, rejecting a reused `omrId`
+  /// (`OmrSubmission.omrId`'s own doc comment — Critical Rule 7). Separate
+  /// from [saveSubmission], which is update-only and refuses a submission it
+  /// does not already hold — this is the one method with a create path,
+  /// used only by `OmrSubmissionRepositoryImpl` at capture time.
+  Future<Result<OmrSubmission>> createSubmission(OmrSubmission submission);
 }

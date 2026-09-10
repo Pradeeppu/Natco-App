@@ -3,14 +3,15 @@ import 'package:natco_app/core/services/audit_sink.dart';
 import 'package:natco_app/core/services/device_info_service.dart';
 import 'package:natco_app/core/utils/clock.dart';
 import 'package:natco_app/core/utils/id_generator.dart';
+import 'package:natco_app/core/utils/result.dart';
 import 'package:natco_app/features/sync/data/repository/sync_queue_repository_impl.dart';
 import 'package:natco_app/features/sync/data/service/sync_queue_data_source.dart';
 import 'package:natco_app/features/sync/domain/entity/sync_queue_entry.dart';
 import 'package:natco_app/features/sync/domain/entity/sync_status.dart';
 import 'package:natco_app/features/sync/domain/service/sync_conflict_policy.dart';
 import 'package:natco_app/features/sync/domain/service/sync_engine.dart';
+
 import 'fault_injecting_sync_backend_fake.dart';
-import 'package:natco_app/core/utils/result.dart';
 
 // A simple in-memory queue for testing
 final class _InMemoryQueueDataSource implements SyncQueueDataSource {
@@ -67,12 +68,12 @@ void main() {
 
       // Create a pending entry
       final SyncQueueEntry entry = SyncQueueEntry(
-        syncId: 'sync-123',
-        entityType: 'omr_submission',
-        entityId: 'sub-456',
-        operation: 'create',
-        payloadRef: 'hive-key-789',
-        idempotencyKey: 'idem-111-222',
+        syncId: 'sync_1',
+        entityType: SyncEntityType.omrSubmission,
+        entityId: 'sub_1',
+        operation: SyncOperation.create,
+        payloadRef: 'ref_1',
+        idempotencyKey: 'idem_1',
         createdAt: DateTime.utc(2026, 9, 9),
         attemptCount: 0,
         status: SyncStatus.pending,

@@ -3,6 +3,33 @@ library;
 
 import 'package:natco_app/features/sync/domain/entity/sync_status.dart';
 
+/// The type of entity being synchronised.
+enum SyncEntityType {
+  omrSubmission('omr_submission'),
+  omrAnswer('omr_answer'),
+  omrValidation('omr_validation'),
+  score('score');
+
+  const SyncEntityType(this.wireName);
+  final String wireName;
+
+  static SyncEntityType? tryFromWireName(String? name) =>
+      values.where((e) => e.wireName == name).firstOrNull;
+}
+
+/// The operation being performed on the entity.
+enum SyncOperation {
+  create('create'),
+  update('update'),
+  delete('delete');
+
+  const SyncOperation(this.wireName);
+  final String wireName;
+
+  static SyncOperation? tryFromWireName(String? name) =>
+      values.where((e) => e.wireName == name).firstOrNull;
+}
+
 final class SyncQueueEntry {
   const SyncQueueEntry({
     required this.syncId,
@@ -21,9 +48,9 @@ final class SyncQueueEntry {
   });
 
   final String syncId;
-  final String entityType;
+  final SyncEntityType entityType;
   final String entityId;
-  final String operation;
+  final SyncOperation operation;
   final String payloadRef;
   final String idempotencyKey;
   final DateTime createdAt;
@@ -36,9 +63,9 @@ final class SyncQueueEntry {
 
   Map<String, Object?> toJson() => <String, Object?>{
     'syncId': syncId,
-    'entityType': entityType,
+    'entityType': entityType.wireName,
     'entityId': entityId,
-    'operation': operation,
+    'operation': operation.wireName,
     'payloadRef': payloadRef,
     'idempotencyKey': idempotencyKey,
     'createdAt': createdAt.toUtc().toIso8601String(),
@@ -52,9 +79,9 @@ final class SyncQueueEntry {
 
   static SyncQueueEntry? tryFromJson(Map<String, Object?> json) {
     final String? syncId = json['syncId'] as String?;
-    final String? entityType = json['entityType'] as String?;
+    final SyncEntityType? entityType = SyncEntityType.tryFromWireName(json['entityType'] as String?);
     final String? entityId = json['entityId'] as String?;
-    final String? operation = json['operation'] as String?;
+    final SyncOperation? operation = SyncOperation.tryFromWireName(json['operation'] as String?);
     final String? payloadRef = json['payloadRef'] as String?;
     final String? idempotencyKey = json['idempotencyKey'] as String?;
     final String? createdAtStr = json['createdAt'] as String?;
@@ -107,9 +134,9 @@ final class SyncQueueEntry {
   /// fields.
   SyncQueueEntry copyWith({
     String? syncId,
-    String? entityType,
+    SyncEntityType? entityType,
     String? entityId,
-    String? operation,
+    SyncOperation? operation,
     String? payloadRef,
     String? idempotencyKey,
     DateTime? createdAt,

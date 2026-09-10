@@ -2,6 +2,7 @@
 library;
 
 import 'package:natco_app/core/utils/result.dart';
+import 'package:natco_app/features/auth/domain/service/authorization.dart';
 import 'package:natco_app/features/sync/domain/entity/sync_queue_entry.dart';
 
 abstract interface class SyncQueueRepository {
@@ -20,22 +21,19 @@ abstract interface class SyncQueueRepository {
   /// Overwrites the server's version with the local payload.
   Future<Result<void>> keepLocal({
     required SyncQueueEntry entry,
-    required String actorUserId,
-    required String actorRole,
+    required Authorization authorization,
   });
 
   /// Overwrites the local version with the server's payload, discarding the
   /// local changes.
   Future<Result<void>> keepServer({
     required SyncQueueEntry entry,
-    required String actorUserId,
-    required String actorRole,
+    required Authorization authorization,
   });
 
   /// Escalates the conflict to a supervisor review case without resolving it.
   Future<Result<void>> createReviewCase({
     required SyncQueueEntry entry,
-    required String actorUserId,
-    required String actorRole,
+    required Authorization authorization,
   });
 }

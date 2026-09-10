@@ -6,6 +6,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:natco_app/app/config/service_locator.dart';
 import 'package:natco_app/core/utils/result.dart';
+import 'package:natco_app/features/auth/domain/service/authorization.dart';
 import 'package:natco_app/features/sync/domain/entity/sync_queue_entry.dart';
 import 'package:natco_app/features/sync/domain/repository/sync_queue_repository.dart';
 import 'package:natco_app/features/sync/domain/service/sync_engine.dart';
@@ -36,26 +37,26 @@ class SyncController extends AsyncNotifier<void> {
     state = const AsyncData<void>(null);
   }
 
-  Future<void> keepServer(SyncQueueEntry entry, String userId, String role) async {
+  Future<void> keepServer(SyncQueueEntry entry, Authorization authorization) async {
     state = const AsyncLoading<void>();
     final SyncQueueRepository repo = ref.read(syncQueueRepositoryProvider);
-    await repo.keepServer(entry: entry, actorUserId: userId, actorRole: role);
+    await repo.keepServer(entry: entry, authorization: authorization);
     ref.invalidate(syncQueueProvider);
     state = const AsyncData<void>(null);
   }
 
-  Future<void> keepLocal(SyncQueueEntry entry, String userId, String role) async {
+  Future<void> keepLocal(SyncQueueEntry entry, Authorization authorization) async {
     state = const AsyncLoading<void>();
     final SyncQueueRepository repo = ref.read(syncQueueRepositoryProvider);
-    await repo.keepLocal(entry: entry, actorUserId: userId, actorRole: role);
+    await repo.keepLocal(entry: entry, authorization: authorization);
     ref.invalidate(syncQueueProvider);
     state = const AsyncData<void>(null);
   }
 
-  Future<void> createReviewCase(SyncQueueEntry entry, String userId, String role) async {
+  Future<void> createReviewCase(SyncQueueEntry entry, Authorization authorization) async {
     state = const AsyncLoading<void>();
     final SyncQueueRepository repo = ref.read(syncQueueRepositoryProvider);
-    await repo.createReviewCase(entry: entry, actorUserId: userId, actorRole: role);
+    await repo.createReviewCase(entry: entry, authorization: authorization);
     ref.invalidate(syncQueueProvider);
     state = const AsyncData<void>(null);
   }

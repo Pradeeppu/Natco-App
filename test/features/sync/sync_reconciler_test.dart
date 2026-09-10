@@ -120,9 +120,9 @@ void main() {
       await queueRepository.enqueue(
         SyncQueueEntry(
           syncId: 'sync_1',
-          entityType: 'omr_submission',
-          entityId: 'omr_1',
-          operation: 'create',
+          entityType: SyncEntityType.omrSubmission,
+          entityId: 'sub_1',
+          operation: SyncOperation.create,
           payloadRef: 'ref_1',
           idempotencyKey: 'idem_1',
           createdAt: DateTime.utc(2026),

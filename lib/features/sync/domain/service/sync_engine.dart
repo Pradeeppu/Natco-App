@@ -127,8 +127,8 @@ final class SyncEngine {
 
     // Sort by dependency order first, then by creation date.
     readyEntries.sort((SyncQueueEntry a, SyncQueueEntry b) {
-      final int orderA = _dependencyOrder.indexOf(a.entityType);
-      final int orderB = _dependencyOrder.indexOf(b.entityType);
+      final int orderA = _dependencyOrder.indexOf(a.entityType.wireName);
+      final int orderB = _dependencyOrder.indexOf(b.entityType.wireName);
       final int resolvedA = orderA == -1 ? 99 : orderA;
       final int resolvedB = orderB == -1 ? 99 : orderB;
       
@@ -154,8 +154,8 @@ final class SyncEngine {
 
     // Attempt to sync via backend
     final Result<void> result = await _backend.syncPayload(
-      entityType: uploadingEntry.entityType,
-      operation: uploadingEntry.operation,
+      entityType: uploadingEntry.entityType.wireName,
+      operation: uploadingEntry.operation.wireName,
       payloadRef: uploadingEntry.payloadRef,
       idempotencyKey: uploadingEntry.idempotencyKey,
     );

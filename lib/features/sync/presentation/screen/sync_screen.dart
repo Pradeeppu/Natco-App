@@ -8,6 +8,7 @@ import 'package:natco_app/app/theme.dart';
 import 'package:natco_app/core/widgets/preview_kit.dart';
 import 'package:natco_app/core/widgets/status_chip.dart';
 import 'package:natco_app/features/auth/domain/entity/app_user.dart';
+import 'package:natco_app/features/auth/domain/service/authorization.dart';
 import 'package:natco_app/features/sync/domain/entity/sync_queue_entry.dart';
 import 'package:natco_app/features/sync/domain/entity/sync_status.dart';
 import 'package:natco_app/features/sync/presentation/controller/sync_controller.dart';
@@ -22,7 +23,8 @@ final class SyncScreen extends ConsumerWidget {
 
     final AsyncValue<List<SyncQueueEntry>> queueAsync =
         ref.watch(syncQueueProvider);
-    final AppUser? user = ref.watch(sessionProvider).session?.user;
+    final Authorization authorization = ref.watch(sessionProvider).authorization;
+    final AppUser? user = authorization.user;
     
     if (user == null) {
       return const Scaffold(body: Center(child: Text('Not logged in')));
@@ -31,14 +33,14 @@ final class SyncScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Sync')),
       body: queueAsync.when(
-        data: (List<SyncQueueEntry> entries) => _buildBody(context, ref, entries, user, theme, status),
+        data: (List<SyncQueueEntry> entries) => _buildBody(context, ref, entries, user, theme, status, authorization),
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (Object e, StackTrace s) => Center(child: Text('Error: $e')),
       ),
     );
   }
 
-  Widget _buildBody(BuildContext context, WidgetRef ref, List<SyncQueueEntry> entries, AppUser user, ThemeData theme, NatcoStatusColors status) {
+  Widget _buildBody(BuildContext context, WidgetRef ref, List<SyncQueueEntry> entries, AppUser user, ThemeData theme, NatcoStatusColors status, Authorization authorization) {
     final int syncedCount = entries.where((e) => e.status == SyncStatus.synced).length;
     final int pendingCount = entries.where((e) => e.status == SyncStatus.pending || e.status == SyncStatus.uploading).length;
     final int failedCount = entries.where((e) => e.status == SyncStatus.failed).length;
@@ -107,7 +109,7 @@ final class SyncScreen extends ConsumerWidget {
           Text('Conflict waiting on you', style: theme.textTheme.titleMedium),
           Text('Never resolved automatically', style: theme.textTheme.bodySmall),
           const SizedBox(height: 8),
-          ...conflictEntries.map((e) => _buildConflictCard(context, ref, e, user, theme)),
+          ...conflictEntries.map((e) => _buildConflictCard(context, ref, e, user, theme, authorization)),
         ]
       ],
     );
@@ -130,13 +132,13 @@ final class SyncScreen extends ConsumerWidget {
 
     return ListTile(
       isThreeLine: isFailed,
-      title: Text('${e.entityType} ${e.entityId}'),
+      title: Text('${e.entityType.wireName} ${e.entityId}'),
       subtitle: Padding(
         padding: const EdgeInsets.only(top: 4),
         child: Text(
           isFailed
-              ? '${e.operation}\n${e.errorMessage ?? 'Unknown error'} · ${e.attemptCount} attempts'
-              : e.operation,
+              ? '${e.operation.wireName}\n${e.errorMessage ?? 'Unknown error'} · ${e.attemptCount} attempts'
+              : e.operation.wireName,
           style: theme.textTheme.bodySmall,
         ),
       ),
@@ -144,7 +146,7 @@ final class SyncScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildConflictCard(BuildContext context, WidgetRef ref, SyncQueueEntry e, AppUser user, ThemeData theme) {
+  Widget _buildConflictCard(BuildContext context, WidgetRef ref, SyncQueueEntry e, AppUser user, ThemeData theme, Authorization authorization) {
     final SyncController controller = ref.read(syncControllerProvider.notifier);
     return Card(
       child: Padding(
@@ -153,7 +155,7 @@ final class SyncScreen extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Text(
-              '${e.entityType} ${e.entityId}',
+              '${e.entityType.wireName} ${e.entityId}',
               style: theme.textTheme.titleSmall,
             ),
             const SizedBox(height: 4),
@@ -166,14 +168,14 @@ final class SyncScreen extends ConsumerWidget {
               children: <Widget>[
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => controller.keepServer(e, user.userId, user.role.wireName),
+                    onPressed: () => controller.keepServer(e, authorization),
                     child: const Text('Keep server'),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => controller.keepLocal(e, user.userId, user.role.wireName),
+                    onPressed: () => controller.keepLocal(e, authorization),
                     child: const Text('Keep local'),
                   ),
                 ),
@@ -181,7 +183,7 @@ final class SyncScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 10),
             FilledButton(
-              onPressed: () => controller.createReviewCase(e, user.userId, user.role.wireName),
+              onPressed: () => controller.createReviewCase(e, authorization),
               child: const Text('Create a review case'),
             ),
           ],

@@ -6,7 +6,7 @@ import 'package:natco_app/core/services/device_info_service.dart';
 import 'package:natco_app/core/utils/clock.dart';
 import 'package:natco_app/core/utils/id_generator.dart';
 import 'package:natco_app/core/utils/result.dart';
-import 'package:natco_app/features/auth/domain/entity/user_role.dart';
+import 'package:natco_app/features/auth/domain/service/authorization.dart';
 import 'package:natco_app/features/sync/data/service/sync_queue_data_source.dart';
 import 'package:natco_app/features/sync/domain/entity/sync_queue_entry.dart';
 import 'package:natco_app/features/sync/domain/entity/sync_status.dart';
@@ -53,11 +53,10 @@ final class SyncQueueRepositoryImpl implements SyncQueueRepository {
   @override
   Future<Result<void>> keepLocal({
     required SyncQueueEntry entry,
-    required String actorUserId,
-    required String actorRole,
+    required Authorization authorization,
   }) async {
     final Result<void> authResult = _conflictPolicy.canResolve(
-      actorRole: UserRole.tryFromWireName(actorRole) ?? UserRole.pstTeacher,
+      authorization: authorization,
       entityType: entry.entityType,
       isEscalation: false,
     );
@@ -69,8 +68,8 @@ final class SyncQueueRepositoryImpl implements SyncQueueRepository {
       _event(
         AuditAction.syncConflictResolved,
         entityId: entry.syncId,
-        actorUserId: actorUserId,
-        actorRole: actorRole,
+        actorUserId: authorization.user!.userId,
+        actorRole: authorization.user!.role.wireName,
         newValue: <String, Object?>{'resolution': 'KEEP_LOCAL'},
       ),
     );
@@ -87,11 +86,10 @@ final class SyncQueueRepositoryImpl implements SyncQueueRepository {
   @override
   Future<Result<void>> keepServer({
     required SyncQueueEntry entry,
-    required String actorUserId,
-    required String actorRole,
+    required Authorization authorization,
   }) async {
     final Result<void> authResult = _conflictPolicy.canResolve(
-      actorRole: UserRole.tryFromWireName(actorRole) ?? UserRole.pstTeacher,
+      authorization: authorization,
       entityType: entry.entityType,
       isEscalation: false,
     );
@@ -101,8 +99,8 @@ final class SyncQueueRepositoryImpl implements SyncQueueRepository {
       _event(
         AuditAction.syncConflictResolved,
         entityId: entry.syncId,
-        actorUserId: actorUserId,
-        actorRole: actorRole,
+        actorUserId: authorization.user!.userId,
+        actorRole: authorization.user!.role.wireName,
         newValue: <String, Object?>{'resolution': 'KEEP_SERVER'},
       ),
     );
@@ -119,11 +117,10 @@ final class SyncQueueRepositoryImpl implements SyncQueueRepository {
   @override
   Future<Result<void>> createReviewCase({
     required SyncQueueEntry entry,
-    required String actorUserId,
-    required String actorRole,
+    required Authorization authorization,
   }) async {
     final Result<void> authResult = _conflictPolicy.canResolve(
-      actorRole: UserRole.tryFromWireName(actorRole) ?? UserRole.pstTeacher,
+      authorization: authorization,
       entityType: entry.entityType,
       isEscalation: true,
     );
@@ -133,8 +130,8 @@ final class SyncQueueRepositoryImpl implements SyncQueueRepository {
       _event(
         AuditAction.syncConflictResolved,
         entityId: entry.syncId,
-        actorUserId: actorUserId,
-        actorRole: actorRole,
+        actorUserId: authorization.user!.userId,
+        actorRole: authorization.user!.role.wireName,
         newValue: <String, Object?>{'resolution': 'REVIEW_CASE'},
       ),
     );

@@ -4,7 +4,6 @@ library;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:natco_app/core/errors/failure.dart';
 import 'package:natco_app/core/services/file_system_service.dart';
 import 'package:natco_app/features/omr_processing/domain/service/omr_image_writer.dart';
 

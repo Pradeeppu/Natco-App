@@ -332,6 +332,62 @@ final class FirestoreOmrValidationDataSource implements OmrValidationDataSource 
     return result.map((_) => submission);
   }
 
+  /// Creates `omr_registry/{omrId}` and `omr_submissions/{omrId}` in one
+  /// transaction — the same atomic-guard-document pattern
+  /// `FirestoreStudentDataSource` uses for `student_dedupe`, and what makes
+  /// `firebase/firestore.rules`' `!exists(.../omr_registry/$(omrId))` check
+  /// race-free rather than a check-then-write gap two simultaneous captures
+  /// of the same sheet could both slip through (Critical Rule 7).
+  @override
+  Future<Result<OmrSubmission>> createSubmission(
+    OmrSubmission submission,
+  ) async {
+    final DocumentReference<Map<String, dynamic>> registryRef = _firestore
+        .collection(Collections.omrRegistry)
+        .doc(submission.omrId);
+    final DocumentReference<Map<String, dynamic>> submissionRef = _firestore
+        .collection(Collections.omrSubmissions)
+        .doc(submission.omrId);
+
+    final Result<void> result = await guardAsync(() async {
+      await _firestore.runTransaction((Transaction txn) async {
+        final DocumentSnapshot<Map<String, dynamic>> existing = await txn.get(
+          registryRef,
+        );
+        if (existing.exists) {
+          throw StateError('omrId ${submission.omrId} already registered');
+        }
+        txn
+          ..set(registryRef, <String, Object?>{
+            'omrId': submission.omrId,
+            'capturedBy': submission.capturedBy,
+            'capturedAt': submission.capturedAt.toUtc().toIso8601String(),
+          })
+          ..set(submissionRef, submission.toJson());
+      });
+    }, onError: _mapFirestoreError);
+
+    if (result.isFailure) {
+      final Failure failure = result.failureOrNull!;
+      // A `StateError` thrown inside the transaction reaches `guardAsync` as
+      // a plain object, not a `FirebaseException` — `_mapFirestoreError`
+      // would otherwise report it as an opaque `UnexpectedFailure`, hiding
+      // the one outcome a capture screen actually needs to name.
+      if (failure is UnexpectedFailure &&
+          (failure.diagnostic?.contains('already registered') ?? false)) {
+        return err(
+          DuplicateFailure(
+            userMessage: 'This OMR ID has already been captured.',
+            entityType: 'omr_submission',
+            entityId: submission.omrId,
+          ),
+        );
+      }
+      return err(failure);
+    }
+    return ok(submission);
+  }
+
   Failure _mapFirestoreError(Object error, StackTrace stackTrace) {
     if (error is FirebaseException) {
       return switch (error.code) {
