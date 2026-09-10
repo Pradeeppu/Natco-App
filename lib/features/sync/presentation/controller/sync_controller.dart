@@ -28,7 +28,10 @@ class SyncController extends AsyncNotifier<void> {
   Future<void> retryFailed() async {
     state = const AsyncLoading<void>();
     final SyncEngine engine = ref.read(syncEngineProvider);
-    await engine.syncNow();
+    // Not `syncNow()`: automatic drain deliberately never re-touches a
+    // `FAILED` entry (that is what makes "stops auto-retrying" true), so the
+    // explicit retry action needs the method that resets it first.
+    await engine.retryFailedNow();
     ref.invalidate(syncQueueProvider);
     state = const AsyncData<void>(null);
   }

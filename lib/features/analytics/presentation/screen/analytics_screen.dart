@@ -1,236 +1,297 @@
-/// Analytics with a scope drill-down.
+/// Analytics for one assessment, scoped to the caller.
 ///
-/// Design preview ahead of Phase 10. The breadcrumb is the point of the
-/// screen: State → District → Cluster → School → Grade → Section → Student,
-/// each step narrowing every figure below it and never reaching past the
-/// caller's own scope.
+/// Reads `assessmentId` from the query string, the same convention
+/// `ResultsScreen` uses — there is nowhere else for it to come from short of
+/// a free-typed field (requirement §10), and `AssessmentDetailScreen` is the
+/// real entry point.
+///
+/// Every figure here is computed from real `AssessmentResult`/`OmrAnswer`
+/// records (`LiveAnalyticsRepositoryImpl`), scoped to the caller's own
+/// `AccessScope` exactly like every other list in the app — a Supervisor's
+/// numbers never include a school outside their clusters.
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:natco_app/app/config/service_locator.dart';
 import 'package:natco_app/app/theme.dart';
-import 'package:natco_app/core/widgets/preview_kit.dart';
+import 'package:natco_app/core/utils/result.dart';
+import 'package:natco_app/core/widgets/app_state_views.dart';
+import 'package:natco_app/features/analytics/domain/entity/question_analytics.dart';
+import 'package:natco_app/features/analytics/presentation/controller/analytics_controllers.dart';
+import 'package:natco_app/features/assessments/domain/entity/assessment.dart';
+import 'package:natco_app/features/assessments/presentation/controller/assessment_controllers.dart';
+import 'package:natco_app/features/auth/domain/entity/access_scope.dart';
 
-final class _Question {
-  const _Question(this.number, this.correctPct, this.blankPct);
-  final int number;
-  final double correctPct;
-  final double blankPct;
+final class AnalyticsScreen extends ConsumerWidget {
+  const AnalyticsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final String? assessmentId = GoRouterState.of(
+      context,
+    ).uri.queryParameters['assessmentId'];
+
+    if (assessmentId == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Analytics')),
+        body: const SafeArea(
+          child: EmptyView(
+            title: 'Open an assessment to see its analytics',
+            message:
+                'Go to Assessments, choose one, and use "View analytics" from '
+                'its detail screen.',
+            icon: Icons.insights_outlined,
+          ),
+        ),
+      );
+    }
+
+    final AccessScope scope =
+        ref.watch(sessionProvider).authorization.user?.scope ??
+        const AccessScope(level: ScopeLevel.school);
+    final ({String assessmentId, AccessScope scope}) key = (
+      assessmentId: assessmentId,
+      scope: scope,
+    );
+
+    final AsyncValue<AssessmentAnalyticsSummary> summaryValue = ref.watch(
+      analyticsSummaryProvider(key),
+    );
+    final AsyncValue<List<QuestionAnalytics>> questionsValue = ref.watch(
+      questionAnalyticsProvider(key),
+    );
+    final AsyncValue<Assessment> assessmentValue = ref.watch(
+      assessmentProvider(assessmentId),
+    );
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Analytics')),
+      body: SafeArea(
+        child: summaryValue.when(
+          loading: () => const LoadingView(),
+          error: (Object error, StackTrace _) => FailureView(
+            failure: asFailure(error),
+            onRetry: () => ref.invalidate(analyticsSummaryProvider(key)),
+          ),
+          data: (AssessmentAnalyticsSummary summary) => ListView(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+            children: <Widget>[
+              assessmentValue.maybeWhen(
+                data: (Assessment a) => Text(
+                  '${a.assessmentName} · ${a.subject} · Grade ${a.grade}',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                orElse: () => const SizedBox.shrink(),
+              ),
+              const SizedBox(height: 16),
+              _SummaryMetrics(summary: summary),
+              const SizedBox(height: 24),
+              Text(
+                'Question performance',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '% answering correctly, from every scored sheet in your scope',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
+              questionsValue.when(
+                loading: () => const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (Object error, StackTrace _) =>
+                    FailureView(failure: asFailure(error)),
+                data: (List<QuestionAnalytics> questions) =>
+                    questions.isEmpty
+                    ? const EmptyView(
+                        title: 'Nothing scored yet',
+                        message:
+                            'Question performance appears once at least one '
+                            'sheet in your scope has been scored.',
+                        icon: Icons.query_stats_outlined,
+                      )
+                    : _QuestionPerformanceCard(questions: questions),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-const List<_Question> _questions = <_Question>[
-  _Question(1, 0.92, 0.01),
-  _Question(2, 0.87, 0.02),
-  _Question(3, 0.45, 0.09),
-  _Question(4, 0.81, 0.03),
-  _Question(5, 0.38, 0.22),
-  _Question(6, 0.76, 0.04),
-  _Question(7, 0.64, 0.06),
-  _Question(8, 0.29, 0.31),
-];
+final class _SummaryMetrics extends StatelessWidget {
+  const _SummaryMetrics({required this.summary});
 
-final class AnalyticsScreen extends StatelessWidget {
-  const AnalyticsScreen({super.key});
+  final AssessmentAnalyticsSummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final NatcoStatusColors status = theme.statusColors;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                _Metric(
+                  label: 'Scored',
+                  value: '${summary.scoredCount}',
+                  caption: 'of ${summary.expectedCount} expected',
+                ),
+                _Metric(
+                  label: 'Completion',
+                  value: '${summary.completionPercentage.round()}%',
+                  color: summary.completionPercentage >= 80
+                      ? status.success
+                      : status.warning,
+                ),
+                _Metric(
+                  label: 'Average',
+                  value: '${summary.averagePercentage.round()}%',
+                ),
+              ],
+            ),
+            const Divider(height: 28),
+            Row(
+              children: <Widget>[
+                _Metric(
+                  label: 'Highest',
+                  value: '${summary.highestPercentage.round()}%',
+                  color: status.success,
+                ),
+                _Metric(
+                  label: 'Lowest',
+                  value: '${summary.lowestPercentage.round()}%',
+                  color: status.danger,
+                ),
+                _Metric(
+                  label: 'Awaiting validation',
+                  value: '${summary.needsValidationCount}',
+                  color: summary.needsValidationCount > 0
+                      ? status.warning
+                      : null,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+final class _Metric extends StatelessWidget {
+  const _Metric({required this.label, required this.value, this.color, this.caption});
+
+  final String label;
+  final String value;
+  final Color? color;
+  final String? caption;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Expanded(
+      child: Column(
+        children: <Widget>[
+          Text(
+            value,
+            style: theme.textTheme.titleLarge?.copyWith(color: color),
+          ),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if (caption != null)
+            Text(
+              caption!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+final class _QuestionPerformanceCard extends StatelessWidget {
+  const _QuestionPerformanceCard({required this.questions});
+
+  final List<QuestionAnalytics> questions;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final NatcoStatusColors status = theme.statusColors;
 
-    Color toneFor(double pct) => pct >= 0.6
+    Color toneFor(double pct) => pct >= 60
         ? status.success
-        : pct >= 0.4
+        : pct >= 40
         ? status.warning
         : status.danger;
 
-    return PreviewScaffold(
-      title: 'Analytics',
-      phase: 'Phase 10',
-      children: <Widget>[
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: <Widget>[
-            TextButton(onPressed: () {}, child: const Text('Demo State')),
-            const Icon(Icons.chevron_right, size: 16),
-            TextButton(onPressed: () {}, child: const Text('North District')),
-            const Icon(Icons.chevron_right, size: 16),
-            Text('Riverside Cluster', style: theme.textTheme.titleSmall),
-          ],
-        ),
-        const SizedBox(height: 8),
-        PreviewMetricRow(
-          metrics: <PreviewMetric>[
-            const PreviewMetric(label: 'Schools', value: '2'),
-            const PreviewMetric(label: 'Students', value: '40'),
-            PreviewMetric(
-              label: 'Completion',
-              value: '84%',
-              tone: status.warning,
-              caption: '27 of 32 expected',
-            ),
-            const PreviewMetric(label: 'Average', value: '34/50'),
-          ],
-        ),
-        const SizedBox(height: 24),
-        PreviewSection(
-          title: 'OMR pipeline',
-          subtitle: 'Where this cluster\'s sheets currently sit',
-          child: PreviewListCard(
-            children: previewDivided(<Widget>[
-              _PipelineRow(
-                label: 'Captured',
-                value: 27,
-                of: 32,
-                color: status.success,
-              ),
-              _PipelineRow(
-                label: 'Processed',
-                value: 25,
-                of: 32,
-                color: status.success,
-              ),
-              _PipelineRow(
-                label: 'Awaiting validation',
-                value: 4,
-                of: 32,
-                color: status.warning,
-              ),
-              _PipelineRow(
-                label: 'Scored',
-                value: 21,
-                of: 32,
-                color: status.success,
-              ),
-              _PipelineRow(
-                label: 'Sync failures',
-                value: 1,
-                of: 32,
-                color: status.danger,
-              ),
-            ]),
-          ),
-        ),
-        PreviewSection(
-          title: 'Question performance',
-          subtitle: 'Samagra 1 · Mathematics · % answering correctly',
-          child: Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: _questions
-                    .map(
-                      (_Question q) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Row(
-                          children: <Widget>[
-                            SizedBox(
-                              width: 32,
-                              child: Text(
-                                'Q${q.number}',
-                                style: theme.textTheme.bodySmall,
-                              ),
-                            ),
-                            Expanded(
-                              child: PreviewBar(
-                                fraction: q.correctPct,
-                                color: toneFor(q.correctPct),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            SizedBox(
-                              width: 40,
-                              child: Text(
-                                '${(q.correctPct * 100).round()}%',
-                                textAlign: TextAlign.right,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  fontFeatures: const <FontFeature>[
-                                    FontFeature.tabularFigures(),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: questions
+              .map(
+                (QuestionAnalytics q) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    children: <Widget>[
+                      SizedBox(
+                        width: 36,
+                        child: Text('Q${q.questionNumber}',
+                            style: theme.textTheme.bodySmall),
+                      ),
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: const BorderRadius.all(
+                            Radius.circular(3),
+                          ),
+                          child: LinearProgressIndicator(
+                            value: (q.correctPercentage / 100).clamp(0, 1),
+                            minHeight: 8,
+                            backgroundColor:
+                                theme.colorScheme.surfaceContainerHighest,
+                            color: toneFor(q.correctPercentage),
+                          ),
                         ),
                       ),
-                    )
-                    .toList(growable: false),
-              ),
-            ),
-          ),
-        ),
-        PreviewSection(
-          title: 'Worth a teacher\'s attention',
-          child: PreviewListCard(
-            children: previewDivided(<Widget>[
-              ListTile(
-                leading: Icon(Icons.trending_down, color: status.danger),
-                title: const Text('Q8 — 29% correct'),
-                subtitle: const Text(
-                  'Also the highest blank rate at 31%. Reads more like an '
-                  'unfamiliar question than a hard one.',
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: 42,
+                        child: Text(
+                          '${q.correctPercentage.round()}%',
+                          textAlign: TextAlign.right,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontFeatures: const <FontFeature>[
+                              FontFeature.tabularFigures(),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              ListTile(
-                leading: Icon(Icons.help_outline, color: status.warning),
-                title: const Text('Q5 — 22% left blank'),
-                subtitle: const Text(
-                  'High blanks with moderate accuracy usually means the '
-                  'question was not reached in time.',
-                ),
-              ),
-            ]),
-          ),
+              )
+              .toList(growable: false),
         ),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              'Phase 10 computes these as server-side rollups on result '
-              'publication, so a district dashboard never fans out over a '
-              'hundred thousand answer documents from a phone. Every figure '
-              'must reconcile against the raw results before this screen '
-              'ships.',
-              style: theme.textTheme.bodyMedium,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-final class _PipelineRow extends StatelessWidget {
-  const _PipelineRow({
-    required this.label,
-    required this.value,
-    required this.of,
-    required this.color,
-  });
-
-  final String label;
-  final int value;
-  final int of;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Row(
-        children: <Widget>[
-          SizedBox(
-            width: 150,
-            child: Text(label, style: theme.textTheme.bodyMedium),
-          ),
-          Expanded(child: PreviewBar(fraction: value / of, color: color)),
-          const SizedBox(width: 12),
-          Text(
-            '$value',
-            style: theme.textTheme.titleSmall?.copyWith(color: color),
-          ),
-        ],
       ),
     );
   }

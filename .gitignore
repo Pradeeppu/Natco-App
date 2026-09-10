@@ -44,6 +44,17 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Gradle's own build output and local cache for the Android host project —
+# a real `flutter build apk` run populates these with Kotlin incremental
+# caches, intermediate class files and build-problem reports (a stray one,
+# android/build/reports/problems/problems-report.html, ended up committed
+# before this line existed; safe to leave untracked from here on since it
+# regenerates on every build).
+/android/build/
+/android/app/build/
+/android/.gradle/
+/android/.kotlin/
+
 # Widget Preview related
 .widget_preview/
 

@@ -18,6 +18,7 @@ enum AuditAction {
   omrValidated('OMR_VALIDATED'),
   omrQualityOverridden('OMR_QUALITY_OVERRIDDEN'),
   omrDuplicateResolved('OMR_DUPLICATE_RESOLVED'),
+  omrEvidenceMissing('OMR_EVIDENCE_MISSING'),
   scoreGenerated('SCORE_GENERATED'),
   scoreCorrected('SCORE_CORRECTED'),
   answerKeyPublished('ANSWER_KEY_PUBLISHED'),

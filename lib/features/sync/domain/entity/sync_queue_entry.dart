@@ -98,6 +98,13 @@ final class SyncQueueEntry {
     );
   }
 
+  /// [clearNextAttemptAt] and [clearError] exist because a plain `?? this.x`
+  /// copyWith cannot express "clear this field" — passing `nextAttemptAt:
+  /// null` would just keep the old value, which is exactly wrong for
+  /// `SyncEngine.retryFailedNow()`: it needs to actually drop a stale future
+  /// `nextAttemptAt` from the last backoff, not carry it into the reset
+  /// entry. Same convention `PagedListState.copyWith` uses for its nullable
+  /// fields.
   SyncQueueEntry copyWith({
     String? syncId,
     String? entityType,
@@ -109,9 +116,11 @@ final class SyncQueueEntry {
     int? attemptCount,
     DateTime? lastAttemptAt,
     DateTime? nextAttemptAt,
+    bool clearNextAttemptAt = false,
     SyncStatus? status,
     String? errorMessage,
     String? errorCode,
+    bool clearError = false,
   }) => SyncQueueEntry(
     syncId: syncId ?? this.syncId,
     entityType: entityType ?? this.entityType,
@@ -122,10 +131,12 @@ final class SyncQueueEntry {
     createdAt: createdAt ?? this.createdAt,
     attemptCount: attemptCount ?? this.attemptCount,
     lastAttemptAt: lastAttemptAt ?? this.lastAttemptAt,
-    nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
+    nextAttemptAt: clearNextAttemptAt
+        ? null
+        : (nextAttemptAt ?? this.nextAttemptAt),
     status: status ?? this.status,
-    errorMessage: errorMessage ?? this.errorMessage,
-    errorCode: errorCode ?? this.errorCode,
+    errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+    errorCode: clearError ? null : (errorCode ?? this.errorCode),
   );
 
   @override

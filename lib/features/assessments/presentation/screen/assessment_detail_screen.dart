@@ -158,14 +158,39 @@ final class _Body extends ConsumerWidget {
         const SizedBox(height: 8),
         _Assignments(assessmentId: assessment.assessmentId),
 
-        if (session.authorization.can(Permission.viewResults)) ...<Widget>[
+        if (session.authorization.can(Permission.viewResults) ||
+            session.authorization.can(Permission.viewAnalytics) ||
+            session.authorization.can(Permission.exportReports)) ...<Widget>[
           const Divider(height: 32),
-          OutlinedButton.icon(
-            onPressed: () => context.push(
-              '${RoutePaths.results}?assessmentId=${assessment.assessmentId}',
-            ),
-            icon: const Icon(Icons.grading_outlined),
-            label: const Text('View results'),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: <Widget>[
+              if (session.authorization.can(Permission.viewResults))
+                OutlinedButton.icon(
+                  onPressed: () => context.push(
+                    '${RoutePaths.results}?assessmentId=${assessment.assessmentId}',
+                  ),
+                  icon: const Icon(Icons.grading_outlined),
+                  label: const Text('View results'),
+                ),
+              if (session.authorization.can(Permission.viewAnalytics))
+                OutlinedButton.icon(
+                  onPressed: () => context.push(
+                    '${RoutePaths.analytics}?assessmentId=${assessment.assessmentId}',
+                  ),
+                  icon: const Icon(Icons.insights_outlined),
+                  label: const Text('View analytics'),
+                ),
+              if (session.authorization.can(Permission.exportReports))
+                OutlinedButton.icon(
+                  onPressed: () => context.push(
+                    '${RoutePaths.reports}?assessmentId=${assessment.assessmentId}',
+                  ),
+                  icon: const Icon(Icons.download_outlined),
+                  label: const Text('Export reports'),
+                ),
+            ],
           ),
         ],
 

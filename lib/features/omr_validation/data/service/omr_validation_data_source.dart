@@ -23,6 +23,10 @@ abstract interface class OmrValidationDataSource {
 
   Future<Result<OmrSubmission>> getSubmission(String omrId);
 
+  /// Every submission in `CAPTURED` or `PROCESSING`, with no scope filter —
+  /// see `OmrValidationRepository.listCapturedOrProcessing` for why.
+  Future<Result<List<OmrSubmission>>> listCapturedOrProcessing();
+
   Future<Result<Page<OmrSubmission>>> listSubmissionsForAssessment({
     required String assessmentId,
     required AccessScope scope,

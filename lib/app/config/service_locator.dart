@@ -24,6 +24,9 @@ import 'package:natco_app/core/services/file_system_service.dart';
 import 'package:natco_app/core/services/logger.dart';
 import 'package:natco_app/core/utils/clock.dart';
 import 'package:natco_app/core/utils/id_generator.dart';
+import 'package:natco_app/features/analytics/data/repository/firestore_analytics_repository_impl.dart';
+import 'package:natco_app/features/analytics/data/repository/live_analytics_repository_impl.dart';
+import 'package:natco_app/features/analytics/domain/repository/analytics_repository.dart';
 import 'package:natco_app/features/assessment_sessions/data/repository/session_repository_impl.dart';
 import 'package:natco_app/features/assessment_sessions/data/service/demo_session_data.dart';
 import 'package:natco_app/features/assessment_sessions/data/service/session_store.dart';
@@ -48,6 +51,8 @@ import 'package:natco_app/features/omr_validation/data/service/firestore_omr_val
 import 'package:natco_app/features/omr_validation/data/service/in_memory_omr_validation_data_source.dart';
 import 'package:natco_app/features/omr_validation/data/service/omr_validation_data_source.dart';
 import 'package:natco_app/features/omr_validation/domain/repository/omr_validation_repository.dart';
+import 'package:natco_app/features/reports/data/repository/report_repository_impl.dart';
+import 'package:natco_app/features/reports/domain/repository/report_repository.dart';
 import 'package:natco_app/features/results/data/repository/result_repository_impl.dart';
 import 'package:natco_app/features/results/data/service/firestore_result_data_source.dart';
 import 'package:natco_app/features/results/data/service/in_memory_result_data_source.dart';
@@ -418,6 +423,8 @@ final Provider<SyncReconciler> syncReconcilerProvider =
     Provider<SyncReconciler>((Ref ref) {
       return SyncReconciler(
         queueRepository: ref.watch(syncQueueRepositoryProvider),
+        omrRepository: ref.watch(omrValidationRepositoryProvider),
+        fileSystem: ref.watch(fileSystemServiceProvider),
       );
     });
 
@@ -463,6 +470,43 @@ final Provider<ResultRepository> resultRepositoryProvider =
         dataSource: ref.watch(resultDataSourceProvider),
         omrRepository: ref.watch(omrValidationRepositoryProvider),
         sessionRepository: ref.watch(sessionRepositoryProvider),
+        assessmentRepository: ref.watch(assessmentRepositoryProvider),
+        auditSink: ref.watch(auditSinkProvider),
+        idGenerator: ref.watch(idGeneratorProvider),
+        clock: ref.watch(clockProvider),
+        deviceInfo: ref.watch(deviceInfoProvider),
+      ),
+    );
+
+// ---------------------------------------------------------------- analytics
+
+final Provider<AnalyticsRepository> analyticsRepositoryProvider =
+    Provider<AnalyticsRepository>((Ref ref) {
+      final AppConfig config = ref.watch(appConfigProvider);
+      if (!config.environment.usesFirebase) {
+        return LiveAnalyticsRepositoryImpl(
+          resultRepository: ref.watch(resultRepositoryProvider),
+          omrRepository: ref.watch(omrValidationRepositoryProvider),
+          sessionRepository: ref.watch(sessionRepositoryProvider),
+        );
+      }
+      return FirestoreAnalyticsRepositoryImpl(FirebaseFirestore.instance);
+    });
+
+// ------------------------------------------------------------------ reports
+
+// No environment branch: `ReportRepositoryImpl` only composes other
+// already-environment-aware repositories (results, analytics, OMR, sync,
+// schools, students) — it has no backend touchpoint of its own to swap.
+final Provider<ReportRepository> reportRepositoryProvider =
+    Provider<ReportRepository>(
+      (Ref ref) => ReportRepositoryImpl(
+        resultRepository: ref.watch(resultRepositoryProvider),
+        analyticsRepository: ref.watch(analyticsRepositoryProvider),
+        omrRepository: ref.watch(omrValidationRepositoryProvider),
+        syncQueueRepository: ref.watch(syncQueueRepositoryProvider),
+        schoolRepository: ref.watch(schoolHierarchyRepositoryProvider),
+        studentRepository: ref.watch(studentRepositoryProvider),
         assessmentRepository: ref.watch(assessmentRepositoryProvider),
         auditSink: ref.watch(auditSinkProvider),
         idGenerator: ref.watch(idGeneratorProvider),

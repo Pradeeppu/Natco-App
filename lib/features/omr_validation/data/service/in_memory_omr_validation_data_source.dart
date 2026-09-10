@@ -93,6 +93,17 @@ final class InMemoryOmrValidationDataSource implements OmrValidationDataSource {
   }
 
   @override
+  Future<Result<List<OmrSubmission>>> listCapturedOrProcessing() async => ok(
+    _submissions.values
+        .where(
+          (OmrSubmission s) =>
+              s.processingStatus == OmrProcessingStatus.captured ||
+              s.processingStatus == OmrProcessingStatus.processing,
+        )
+        .toList(growable: false),
+  );
+
+  @override
   Future<Result<Page<OmrSubmission>>> listSubmissionsForAssessment({
     required String assessmentId,
     required AccessScope scope,

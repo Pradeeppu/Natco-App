@@ -88,4 +88,28 @@ abstract interface class OmrValidationRepository {
     required double machineScore,
     required double finalScore,
   });
+
+  /// Every submission still in `CAPTURED` or `PROCESSING` on this device, with
+  /// no scope filter.
+  ///
+  /// A third narrow exception to the file doc's charter, for the same reason
+  /// as [listSubmissionsForAssessment]: the sync reconciler
+  /// (docs/06-offline-sync-strategy.md §4) runs at launch, before any
+  /// signed-in user's scope is even relevant — it is asking "what did *this
+  /// device* capture that never finished", not "what may the current user
+  /// see". Scope-filtering that question would be wrong, not just redundant.
+  Future<Result<List<OmrSubmission>>> listCapturedOrProcessing();
+
+  /// Marks [omrId] `UNREADABLE_EVIDENCE_MISSING` — the reconciler's finding
+  /// when a `CAPTURED`/`PROCESSING` submission's image file is gone. This is
+  /// the step that admits the loss rather than hiding it
+  /// (docs/06-offline-sync-strategy.md §4, step 4): the submission is never
+  /// silently dropped, and a Supervisor sees it under `reviewExceptions`.
+  Future<Result<OmrSubmission>> markEvidenceMissing(String omrId);
+
+  /// Resets a `PROCESSING` submission back to `CAPTURED`, for when the image
+  /// is still on disk but processing itself never finished (a crash mid-run).
+  /// Phase 6's pipeline restarts from a clean `CAPTURED` state rather than
+  /// resuming a partial one that does not exist.
+  Future<Result<OmrSubmission>> resetToCaptured(String omrId);
 }

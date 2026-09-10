@@ -22,9 +22,6 @@ import 'test_harness.dart';
 
 /// Routes still showing sample data, with the phase that makes them real.
 const Map<String, String> _previewRoutes = <String, String>{
-  RoutePaths.reports: 'Phase 11',
-  RoutePaths.analytics: 'Phase 10',
-  RoutePaths.sync: 'Phase 9',
   RoutePaths.omrCapture: 'Phase 5',
   RoutePaths.calibration: 'Phase 6',
 };
@@ -44,6 +41,11 @@ const List<String> _realRoutes = <String>[
   '/omr/validation/0001827',
   RoutePaths.results,
   '/results?assessmentId=as_demo_midline_g5',
+  RoutePaths.sync,
+  RoutePaths.analytics,
+  '/analytics?assessmentId=as_demo_midline_g5',
+  RoutePaths.reports,
+  '/reports?assessmentId=as_demo_midline_g5',
 ];
 
 final Finder _band = find.textContaining('every figure below is made up');

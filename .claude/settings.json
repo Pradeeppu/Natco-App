@@ -65,7 +65,21 @@
       "PowerShell($env:FLUTTER_ROOT = \"D:\\\\flutter-sdk\"; & \"D:\\\\flutter-sdk\\\\bin\\\\dart.bat\" analyze 2>&1 | Select-Object -Last 100)",
       "Bash(export FLUTTER_ROOT=/d/flutter-sdk)",
       "Bash(/d/flutter-sdk/bin/flutter test *)",
-      "Bash(echo \"EXIT:$?\")"
+      "Bash(echo \"EXIT:$?\")",
+      "PowerShell($env:FLUTTER_ROOT = \"D:\\\\flutter-sdk\"; & \"D:\\\\flutter-sdk\\\\bin\\\\dart.bat\" analyze 2>&1 | Select-Object -Last 60)",
+      "Bash(cd D:/natco_app && find / -maxdepth 8 -ipath \"*hosted*csv-8*\" -type d 2>/dev/null | head -3)",
+      "Bash(grep -n \"class Csv\\\\|String encode\\\\|List.*encode\\\\|convert\\(\" \"/c/Users/LENOVO/AppData/Local/Pub/Cache/hosted/pub.dev/csv-8.0.0/lib/csv.dart\" 2>/dev/null | head -20)",
+      "Read(//c/Users/LENOVO/AppData/Local/Pub/Cache/hosted/pub.dev/csv-8.0.0/lib/**)",
+      "Read(//c/Users/LENOVO/AppData/Local/Pub/Cache/hosted/pub.dev/csv-8.0.0/**)",
+      "Bash(xargs grep -ln \"class Csv\\\\b\")",
+      "Bash(cat \"/c/Users/LENOVO/AppData/Local/Pub/Cache/hosted/pub.dev/csv-8.0.0/lib/src/csv_codec.dart\")",
+      "Bash(cat \"/c/Users/LENOVO/AppData/Local/Pub/Cache/hosted/pub.dev/csv-8.0.0/lib/csv.dart\" 2>/dev/null | head -20)",
+      "PowerShell($env:FLUTTER_ROOT = \"D:\\\\flutter-sdk\"; & \"D:\\\\flutter-sdk\\\\bin\\\\dart.bat\" analyze 2>&1 | Select-Object -Last 150)",
+      "Bash(/d/flutter-sdk/bin/flutter build *)",
+      "Bash(ls -la \"/c/Users/LENOVO/AppData/Local/Temp/claude/d--natco-app/f104a11e-964b-4894-b4ab-85a0c362de2c/tasks/bs5xlajoq.output\" 2>&1)",
+      "Read(//c/Users/LENOVO/AppData/Local/Temp/claude/d--natco-app/f104a11e-964b-4894-b4ab-85a0c362de2c/tasks/**)",
+      "Bash(git rm *)",
+      "Bash(git reset *)"
     ],
     "additionalDirectories": [
       "D:\\docs",

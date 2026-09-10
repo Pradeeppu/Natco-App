@@ -251,9 +251,13 @@ service cloud.firestore {
                     && canAssignRole(request.resource.data.role)
                     && userInScope(request.resource.data)
                     && userInScope(resource.data);
-      allow delete: if hasPerm('manageUsers')
-                    && canAssignRole(resource.data.role)
-                    && userInScope(resource.data);
+      // Never deleted, by any role, under any scope — a deleted user would
+      // orphan every audit entry, captured sheet and score correction naming
+      // them, and the audit trail has to stay answerable (requirement §26).
+      // `UserRepository` has no delete method at all; `setUserActive` is the
+      // only way an account stops being usable. This rule is what keeps that
+      // true against a client that skips the repository and writes directly.
+      allow delete: if false;
     }
 
     // Uniqueness guard for sign-in addresses, keyed by the normalised email —
@@ -265,9 +269,13 @@ service cloud.firestore {
       allow list:   if hasPerm('manageUsers');
       allow create: if hasPerm('manageUsers')
                     && !exists(/databases/$(database)/documents/user_email/$(normalisedEmail));
-      // Never updated: an email guard that can be repointed guards nothing.
+      // Never updated or deleted: an email guard that can be repointed or
+      // removed guards nothing. In particular, deleting this while the user
+      // document it guards still exists (which it always does — `users`
+      // denies delete above) would let a second account claim the same
+      // email while the first is still active.
       allow update: if false;
-      allow delete: if hasPerm('manageUsers');
+      allow delete: if false;
     }
 
     // The role→permission mirror. Readable so an admin UI can render it;

@@ -231,4 +231,66 @@ final class OmrValidationRepositoryImpl implements OmrValidationRepository {
       ),
     );
   }
+
+  @override
+  Future<Result<List<OmrSubmission>>> listCapturedOrProcessing() =>
+      _dataSource.listCapturedOrProcessing();
+
+  @override
+  Future<Result<OmrSubmission>> markEvidenceMissing(String omrId) async {
+    final Result<OmrSubmission> current = await _dataSource.getSubmission(
+      omrId,
+    );
+    if (current.isFailure) {
+      return err(current.failureOrNull!);
+    }
+    final Result<OmrSubmission> result = await _dataSource.saveSubmission(
+      current.valueOrNull!.copyWith(
+        processingStatus: OmrProcessingStatus.unreadableEvidenceMissing,
+        updatedAt: _clock.nowUtc(),
+      ),
+    );
+    if (result.isSuccess) {
+      // Recorded rather than silently dropped — the whole point of this
+      // status (docs/06-offline-sync-strategy.md §4, step 4). A Supervisor
+      // finds it through `reviewExceptions`, not by noticing a sheet is
+      // simply gone.
+      await _auditSink.record(
+        AuditEvent(
+          auditId: _idGenerator.newId(),
+          userId: 'SYSTEM',
+          role: 'SYSTEM',
+          action: AuditAction.omrEvidenceMissing,
+          entityType: 'omr_submission',
+          entityId: omrId,
+          timestamp: _clock.nowUtc(),
+          deviceId: _deviceInfo.deviceId,
+          appVersion: _deviceInfo.appVersion,
+        ),
+      );
+    }
+    return result;
+  }
+
+  @override
+  Future<Result<OmrSubmission>> resetToCaptured(String omrId) async {
+    final Result<OmrSubmission> current = await _dataSource.getSubmission(
+      omrId,
+    );
+    if (current.isFailure) {
+      return err(current.failureOrNull!);
+    }
+    final OmrSubmission submission = current.valueOrNull!;
+    if (submission.processingStatus != OmrProcessingStatus.processing) {
+      // Nothing to reset — resetting a submission that is not actually stuck
+      // would be an unasked-for state change, not a recovery.
+      return ok(submission);
+    }
+    return _dataSource.saveSubmission(
+      submission.copyWith(
+        processingStatus: OmrProcessingStatus.captured,
+        updatedAt: _clock.nowUtc(),
+      ),
+    );
+  }
 }

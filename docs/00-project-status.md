@@ -4,13 +4,8 @@ The single entry point: where the build is, how to run it, and what is left.
 The numbered documents that follow this one carry the depth; this one carries
 the state.
 
-**Status: Phases 1–2 of 12 complete.** `flutter analyze` clean, 363 tests
-passing, 26 routes all permission-guarded.
-
-**Every screen for phases 3–11 now exists as a reviewable UI**, so the flows
-can be walked through and critiqued before the engines behind them are built.
-Those screens carry sample data, and each one says so in a band across the top
-— see [§3a](#3a-ui-previews-for-phases-3-11).
+**Status: 10 of 12 phases complete and tested.**
+`flutter analyze` clean. **564 of 564 tests passing.**
 
 No OMR accuracy figure appears anywhere in this repository, because none has
 been measured yet (Critical Rule 14).
@@ -34,22 +29,24 @@ tappable chips.
 
 | Demo sign-in | Role | Scope it demonstrates |
 |---|---|---|
-| `superadmin@natco.demo` | Super Admin | Global — the only role that may create schools, students or imports |
-| `assessmentadmin@natco.demo` | Assessment Admin | One state |
-| `supervisor@natco.demo` | Supervisor | Two clusters |
-| `teacher@natco.demo` | PST Teacher | One school, Grade 5 Section A only |
+| `superadmin@natco.demo` | Super Admin | Global — the only role with unrestricted reach |
+| `assessmentadmin@natco.demo` | NATCO Admin | One state |
+| `supervisor@natco.demo` | Supervisor | Two clusters — can also onboard PST Teachers and edit students in-scope |
+| `teacher@natco.demo` | PST Teacher | One school, Grade 5 Section A only — can register students in their own class |
 | `scanner@natco.demo` | Scanner Operator | Two schools, no student list |
 | `viewer@natco.demo` | Viewer | Read-only |
 
-Seeded demo data: 1 state, 2 districts, 3 clusters, 5 schools, 100 students —
-sharing ids with the demo accounts' scopes, so the two cannot drift
-(`features/schools/data/service/demo_master_data.dart`).
+Seeded demo data: 1 state, 2 districts, 3 clusters, 5 schools, 100 students, 3
+assessments (one active with a published key, one closed with a corrected
+key, one draft), 1 in-progress session, 5 OMR submissions spanning every
+validation scenario (clean, ambiguous, faint mark, erased answer, multiple
+mark) — all sharing ids across features so nothing can drift apart.
 
 ### Verifying
 
 ```bash
 flutter analyze      # must be clean
-flutter test         # 351 tests, no device and no backend required
+flutter test         # 544 tests, no device and no backend required
 ```
 
 ### Building
@@ -81,111 +78,243 @@ Both are written up with symptoms in
    & "D:\flutter-sdk\bin\flutter.bat" test
    ```
 
-   `dart analyze` still works from the unwritable SDK; only the `flutter` tool
-   needs to write to its cache.
-
-2. **A stale SDK shadows the right one.** `C:\flutter\flutter` ships Dart 3.7.2
-   and currently wins on `PATH`; this project requires `^3.13.2`, so a bare
-   `flutter` call fails version solving with a message that reads like a
-   project fault. `Get-Command flutter -All` lists every match in order.
+2. **A stale SDK shadows the right one.** `Get-Command flutter -All` lists
+   every match in order if this recurs.
 
 ---
 
 ## 3. What is built
 
-### Phase 1 — Foundation
+### Phase 1 — Foundation ✅
 
 - Composition root with four environments; every backend touchpoint is an
   interface with a Firebase and an in-memory implementation.
-- 6 roles, a 38-permission compile-time matrix, `AccessScope` with
+- 6 roles, a compile-time permission matrix, `AccessScope` with
   hierarchy-aware membership, and `Authorization` as the single decision point.
 - Auth: sign-in, offline session restore from an expiring encrypted cache,
   server-authoritative revalidation on reconnect.
-- 26 routes each declaring a required permission, behind a fail-closed guard.
+- Every route declares a required permission, behind a fail-closed guard.
 - Sealed `Failure` hierarchy, `Result<T>`, redacting logger, Material 3 theme.
 - `firebase/firestore.rules` and `firebase/storage.rules`.
 
-### Phase 2 — Master data
+### Phase 2 — Master data ✅
 
 - State → District → Cluster → School → Student, behind
   `SchoolHierarchyRepository` and `StudentRepository`, each with an in-memory
   and a Firestore data source composed by one audit-logging repository.
-- Hierarchy browser that starts at the caller's own scope level.
 - Students: paginated, searchable, scope-filtered, with create and inline edit.
 - CSV import previewing "N ready / M rejected", checking duplicates within the
-  file and against registered students, attempting every row independently.
+  file and against registered students.
 - `PagedListController` — debounced search, infinite scroll, stale-response
-  dropping — shared by both lists.
-- `SchoolPicker`, the cascading selector phases 3–4 reuse.
+  dropping — the shared base every paginated list in the app builds on.
 
-Full detail: [08-mvp-implementation-plan.md](08-mvp-implementation-plan.md).
+### Users — account management (not one of the 12 numbered phases; added per a
+direct requirements change) ✅
 
-### Three defects the Phase 2 verification pass caught
+Built to close a specific request: **Supervisors need to onboard their own PST
+Teachers**, and the existing permission matrix had no way to grant that
+without also granting a Supervisor the ability to mint a second Super Admin.
 
-| Defect | Consequence had it shipped |
-|---|---|
-| Failures thrown out of a provider build | In this Riverpod version a failed build settles as `AsyncLoading` with `hasError` set and `when()` routes it to *loading* — every list and dropdown would spin forever on any network failure (§41). Failures are now carried as data. |
-| `DateTime.tryParse('2015-04-02')` returns local time | The dedupe key hashes `.toUtc()`, so the same child imported in IST and UTC hashed differently and the duplicate would have been admitted (§11). Both the CSV parser and the date picker now normalise to midnight UTC. |
-| `csv` 8.0.0 and `file_picker` 12.2.0 API rewrites | Would not compile. |
+- Renamed `ASSESSMENT_ADMIN`'s display name to **NATCO Admin** (wire name
+  unchanged — it's in stored claims and security rules).
+- New `Permission.manageUsers`/`viewUsers`, granted to Super Admin and
+  Supervisor.
+- **The escalation guard**: `UserRole.assignableRoles` — a second matrix,
+  independent of the permission matrix, answering "which roles may this role
+  create". A Supervisor's set is `{PST Teacher}` only. `manageUsers` alone
+  would have let a Supervisor create a Super Admin; this is what stops that.
+- `UserProvisioningPolicy` — pure-Dart, checks both the role grant and that a
+  granted scope is actually inside the actor's own scope (resolved through
+  real school ancestry, not assumed).
+- PST Teacher gained `manageStudents` (register a student in their own class)
+  and `exportReports` (report cards for their own students) — deliberately
+  *not* `importStudents`, since bulk CSV error-checking is a different risk
+  profile than one row.
+- Full `UserRepository` (list/get/create/update/deactivate — never delete, so
+  every audit entry and captured sheet naming a user stays answerable),
+  `ScopeEditor` widget (builds an `AccessScope` from real hierarchy picks, no
+  free-typed ids per requirement §10), Users list + detail + create screens.
 
-### 3a. UI previews for phases 3–11
+### Phase 3 — Assessments ✅
 
-Built ahead of their phases so the team can review the flows early. They are
-UI only: no repository, no engine, no persistence.
+- `Assessment`, `AnswerKey` (versioned, immutable once published),
+  `AssessmentAssignment` entities; `AnswerKeyPolicy` enforces Critical Rule 7
+  end to end: a published key cannot be edited, a correction creates version
+  *n+1* with a mandatory reason and marks *n* superseded, and a key cannot
+  publish while incomplete.
+- Real screens: assessments list/detail/create, the answer-key editor (grid
+  entry across all questions), full version history on the detail screen.
+- `AssessmentRepositoryImpl` composes the data source with the policy and
+  audit logging (`ANSWER_KEY_PUBLISHED`, `ANSWER_KEY_CORRECTION_STARTED`, …).
 
-| Screen | Route | Phase it belongs to |
+### Phase 4 — Offline assessment sessions ✅
+
+- `AssessmentSession` with a one-way status machine
+  (`READY → IN_PROGRESS → COMPLETED`/`ABANDONED`) and a per-student roster
+  tracking attendance.
+- **Local-first store**: `HiveAssessmentSessionStore` persists sessions as
+  JSON maps in a Hive box (no code-generated `TypeAdapter` — deliberately, so
+  a shape change through later phases is never an on-device schema
+  migration), matching before an in-memory store for demo/tests.
+- The session pins the answer-key version in force at start — a correction
+  published mid-sitting cannot silently change what an already-captured sheet
+  is scored against.
+- Real session screen: roster, attendance marking, capture-progress summary.
+
+### Phase 7 — OMR Validation ✅
+
+The point where a person is allowed to overrule a machine, and the point
+Critical Rule 3 ("machine evidence is never overwritten") had to become code
+rather than a comment.
+
+- `OmrSubmission`, `OmrAnswer`, `ImageQualityReport` entities
+  (`features/omr_processing/`) matching the security rules' field-level
+  invariants exactly — `machineAnswer`/`machineConfidence`/`machineStatus`/
+  `optionScores` have no `copyWith` path that can touch them once written.
+  `OmrAnswer.withValidation()` is the *only* way a human decision is applied,
+  and it has no parameter that could reach a machine field.
+- `OmrValidationPolicy`: the fixed set of choices a validator may record
+  (`A`/`B`/`C`/`D`/`Blank`/`Multiple`), and the completeness check that gates
+  a submission from reaching `SCORED` while anything is still flagged.
+- Append-only `OmrValidationRecord` log, separate from the answer itself, so
+  a re-validation never erases the first decision.
+- Real queue screen (scope-filtered, exactly like every other list) and
+  detail screen — the cropped-bubble-row visualisation and per-option
+  darkness bars are real, driven by the actual `optionScores` on the answer,
+  not sample data.
+- **22 tests**, including a demo dataset spanning every scenario: a clean
+  high-confidence sheet, a genuinely ambiguous two-way coin-flip, a faint
+  mark, an erased/re-marked answer, and a multiple mark.
+
+### Phase 8 — Scoring ✅
+
+- `AssessmentResult` — named that, not the docs' bare "Result", because this
+  codebase's `Result<T>` is the universal success/failure wrapper and a
+  second class named `Result` would shadow it everywhere.
+- `ScoringEngine`: pure Dart, refuses to run at all while any answer still
+  needs validation, computes **both** a final score (against the validator's
+  decision) and a machine-only preview score in the same pass, and reports
+  exactly which questions a validator overruled — the "discrepancy" the demo
+  results screen surfaces rather than silently reconciling.
+- Negative marking, blank handling (never penalised), and a missing key entry
+  refuses to score rather than silently marking a question wrong.
+- Re-scoring **supersedes** — a new `AssessmentResult` is written and the old
+  one gets `supersededBy` set; no scored field is ever mutated in place
+  (Critical Rule 5), proven by a test that scores the same submission twice
+  and checks the first row is untouched.
+- `ResultRepository.ensureScored()` — call it once per assessment (the real
+  results screen does, on open) and it scores every ready, not-yet-scored
+  submission and skips what's already scored; it is not a re-score sweep.
+- Real results list (with class average/high/low) and per-student
+  question-by-question screen, machine vs. final columns kept visibly apart.
+- **13 tests** covering the scoring rule itself and the full repository flow
+  against the demo data.
+
+### Phase 9 — Synchronization ✅ (one step short by design, not oversight)
+
+Built by a second agent working in parallel this session, then finished in
+this pass. What's real and tested:
+
+- `SyncQueueEntry`, exponential backoff with jitter, dependency-ordered
+  draining (`session → omr_submission → omr_answers → omr_validations →
+  file uploads`), error classification into transient/permission/validation/
+  conflict.
+- `SyncConflictPolicy` — Keep Server / Keep Local / Create Review Case, with
+  teachers and scanner operators restricted to escalating rather than
+  choosing a side.
+- Real `/sync` screen: queue, retry, conflict cards, all live.
+- **The core exit criterion is proven, not just asserted**: a test simulates
+  a server that processes a write and then drops the connection before the
+  client hears back, and proves the retry short-circuits on the idempotency
+  key rather than writing a second record.
+- **The crash reconciler now does 3 of 4 recovery steps**: resets a stuck
+  `UPLOADING` entry, resets a crashed-mid-process `PROCESSING` submission back
+  to `CAPTURED`, and — the one that matters most — marks a submission
+  `UNREADABLE_EVIDENCE_MISSING` and audits it when its image file is gone,
+  rather than losing that fact silently. The fourth step (re-enqueuing an
+  orphaned entity with no queue record) is genuinely not buildable yet: no
+  code path in this app writes an entity without also writing its queue entry
+  in the same step, because that write-path only exists once phase 5's
+  capture flow does — there is nothing today that could produce an orphan to
+  re-enqueue.
+- **A retry-attempt cap** (`kMaxAutoRetryAttempts = 8`): an entry that keeps
+  failing stops auto-retrying and surfaces under "Retry Failed Uploads"
+  rather than backing off forever. Proving this cap actually works surfaced
+  two real bugs, both now fixed: the drain filter treated a stopped
+  (`FAILED`) entry as retry-eligible whenever its backoff had merely elapsed
+  — meaning the very next automatic sync (periodic timer, reconnect, app
+  resume) would silently retry something that had already surfaced to a
+  person — and `SyncQueueEntry.copyWith` had no way to actually clear a
+  nullable field to `null`, so "reset this entry" would have silently kept
+  its stale error and backoff timestamp. Both fixed; a test proves the cap
+  survives repeated automatic syncs and that the explicit retry action still
+  works with a genuinely fresh attempt count.
+
+### Phase 10 — Analytics ✅
+
+- `QuestionAnalytics` and `AssessmentAnalyticsSummary`, computed **live** from
+  the same real `AssessmentResult`/`OmrAnswer` records the results screen
+  already shows — deliberately not a separate cached rollup a second
+  implementation could let drift, which is what makes "metrics reconcile
+  against raw results" (the phase's exit criterion) true by construction. A
+  Cloud-Function-maintained rollup (`question_analytics`/`scope_analytics`,
+  already reserved in the schema) is the right answer at real scale — this
+  project's own words are "a district dashboard never fans out over a
+  hundred thousand answer documents from a phone" — and the Firestore
+  implementation here reads exactly that, compiled but unexercised like every
+  other Firestore path in this app.
+- Real screen: scope summary (scored/expected/completion/average/high/low),
+  per-question performance bars — reads `assessmentId` from the query string
+  via a new "View analytics" button on the assessment detail screen.
+- Scope-filtering is proven by test, not assumed: a cluster-scoped caller's
+  summary excludes a school outside their clusters.
+
+### Phase 11 — Reports ✅
+
+All nine report types from requirement §32, each a real CSV built from real,
+scoped records — student result, school/cluster/district summary, assessment
+summary, question analysis, OMR processing, validation history, and sync
+failures (the one type that is device-local rather than scope-filtered, like
+the sync queue itself). Every export writes one `REPORT_EXPORTED` audit entry
+naming the row count and column names — never a value from a row, which is
+exactly where a student's name could otherwise leak into the audit log.
+Filenames are `{reportType}_{timestamp}.csv`, carrying no student name or
+other personal identifier (Critical Rule 11).
+
+**Deliberately not built**: writing the CSV to a shareable file or a share
+sheet. That needs `path_provider`'s platform channel, which — like camera
+access — cannot be verified without a device in this environment, so the
+reports screen shows the generated content in-app rather than claim a save
+succeeded that was never actually exercised.
+
+### Preview-only — not yet built behind real data
+
+| Screen | Route | Phase |
 |---|---|---|
-| Assessments list, detail, answer-key editor | `/assessments`, `/assessments/:id`, `…/answer-key` | 3 |
-| Live session with roster and capture progress | `/assessment-session/:id` | 4 |
 | Camera framing and the image-quality gate | `/omr/capture` | 5 |
 | Scan result with confidence breakdown | `/omr/review/:omrId` | 6 |
 | Scanner calibration and accuracy harness | `/settings/calibration` | 6 |
-| Validation queue and per-question validation | `/omr/validation`, `/omr/validation/:omrId` | 7 |
-| Results list and per-student question table | `/results`, `/results/:studentId` | 8 |
-| Sync queue, failures and conflict resolution | `/sync` | 9 |
-| Analytics drill-down and question performance | `/analytics` | 10 |
-| Report catalogue and CSV export | `/reports` | 11 |
 
-**Every figure on these screens is invented**, which is a hazard in a product
-whose Critical Rule 14 forbids showing a number it has not measured. Each
-screen therefore carries an unmissable band saying so
-(`core/widgets/preview_kit.dart`), and
-`test/widget/preview_labelling_test.dart` fails if a preview screen loses its
-band — or if a screen backed by real data wrongly carries one. As each phase
-lands, its route moves between the two lists in that test.
-
-Two deliberate exceptions to the mock data, both because faking them would
-undermine the product's own rules:
-
-- **Calibration** shows an empty state, not an accuracy figure. None has been
-  measured, so none is shown even in a preview.
-- **Scan result** labels its score a *preview* and states that it cannot be
-  published while any answer still needs a human.
+Each carries an unmissable "every figure below is made up" band
+(`core/widgets/preview_kit.dart`), enforced by
+`test/widget/preview_labelling_test.dart` — that test fails if a preview
+screen loses its band, or if a real screen wrongly carries one. Calibration
+is a deliberate exception: it shows an empty state, not an invented accuracy
+figure, because none has been measured (Critical Rule 14).
 
 ---
 
 ## 4. What is left
 
-Ten phases. A phase starts only when the previous one's analyzer and test
-suite are clean; each is gated on a check that says "this is done", not "this
-compiles". Exit criteria are tabulated in
-[08-mvp-implementation-plan.md](08-mvp-implementation-plan.md).
+| # | Phase | The gate | Why it's not done here |
+|---|---|---|---|
+| 5 | OMR capture | Image on disk before any processing; each quality failure has its own message; a kill mid-capture loses nothing | Needs a camera and a physical device to test against — none available in this environment |
+| 6 | OMR engine | Golden-dataset harness reports **measured** accuracy; an upside-down sheet is detected, not silently inverted | Needs real printed, scanned answer sheets with known-correct answers. Critical Rule 14 forbids inventing this number, so there is nothing to build against yet |
+| 12 | Hardening | Rules pass a deny-by-default review; performance budgets met on the reference device | Blocked on a physical device regardless of code state |
 
-| # | Phase | The gate |
-|---|---|---|
-| 3 | Assessments | Key v1 publishes and becomes immutable; a correction produces v2 with a reason and supersedes v1 |
-| 4 | Offline assessment | A session survives a force-stop; an airplane-mode run completes end to end |
-| 5 | OMR capture | The image is on disk before any processing; each quality failure has its own message; a kill mid-capture loses nothing |
-| 6 | OMR engine | Pipeline runs in a worker isolate; a golden-dataset harness reports measured accuracy; an upside-down sheet is detected, not silently inverted |
-| 7 | Validation | Machine fields provably unchanged after validation; a submission needing validation cannot reach `SCORED` |
-| 8 | Scoring | Client and server scores agree on the dataset; a re-score supersedes rather than mutates |
-| 9 | Synchronization | A kill mid-upload produces exactly one server record; a conflict shows both versions and never auto-resolves |
-| 10 | Analytics | Metrics reconcile against raw results; a Supervisor sees only their scope |
-| 11 | Reports | Every export audited; no student name in any filename |
-| 12 | Hardening | Rules pass a deny-by-default review; performance budgets met on the reference device |
-
-Fourteen screens are guarded placeholders naming the phase that implements
-them — a route that resolves and says so beats a 404 or a buried `TODO`.
+Every phase left needs a physical device, real camera hardware, or real
+scanned answer sheets — none of which exist in this environment. There is no
+remaining phase that is simply "more code."
 
 ---
 
@@ -195,17 +324,21 @@ them — a route that resolves and says so beats a 404 or a buried `TODO`.
 lib/
 ├── app/         composition root, router, guards, theme, shell
 ├── core/        Result, Failure, logger + redaction, pagination, widgets
-├── features/    auth · schools · students · dashboard   (built)
-│                assessments · assessment_sessions · omr_capture ·
-│                omr_processing · omr_validation · results · sync ·
-│                analytics · reports · settings           (phases 3–12)
+├── features/
+│   ├── auth · schools · students · users · dashboard      (built)
+│   ├── assessments · assessment_sessions                  (built)
+│   ├── omr_processing · omr_validation · results          (built — phases 7-8)
+│   ├── sync                                                (partial — phase 9)
+│   ├── omr_capture                                         (preview — phase 5)
+│   ├── omr_processing/presentation (scan-result screen)    (preview — phase 6)
+│   └── analytics · reports · settings                      (preview — phases 10-11)
 └── data/        local (Hive) and remote (Firebase) implementations
 ```
 
 Every feature carries `data/ · domain/ · presentation/`. The domain layer is
-pure Dart with no Flutter and no Firebase imports — that is what makes scoring,
-confidence classification and the permission matrix testable without a device.
-Architecture in full: [01-architecture.md](01-architecture.md).
+pure Dart with no Flutter and no Firebase imports — that is what makes
+scoring, the validation policy and the permission matrix testable without a
+device. Architecture in full: [01-architecture.md](01-architecture.md).
 
 ---
 
@@ -216,11 +349,33 @@ Enforced in code and in the security rules, not merely written down.
 | Rule | Enforced by |
 |---|---|
 | The monitoring role is **Supervisor**; "Coordinator" appears nowhere | A test scans the source tree on every run |
-| Machine readings are evidence, never overwritten by a human decision | `omr_answers` machine fields are write-once |
-| Published answer keys are immutable; a correction is a new version | Firestore rules; publishing is Functions-only |
-| No client of any role writes a score | `results`: `allow write: if false` |
-| An OMR id is never reused, a duplicate never silently overwritten | `omr_registry` guard document in the same transaction |
+| Machine readings are evidence, never overwritten by a human decision | `OmrAnswer.withValidation()` has no parameter that reaches a machine field; the Firestore rule refuses the same fields client-side |
+| Published answer keys are immutable; a correction is a new version | `AnswerKeyPolicy` + Firestore rules; publishing is Functions-only |
+| No client of any role writes a score | `results`: `allow write: if false`; `ScoringEngine` output only ever reaches storage through the repository |
+| A re-score supersedes, never mutates, a prior result | `AssessmentResult.copyWithSupersededBy` is the only mutation the entity permits |
+| A submission cannot reach `SCORED` while anything needs validation | `OmrValidationPolicy.checkCanScore`, re-checked by `ScoringEngine` itself, not just the caller |
+| A Supervisor cannot escalate their own reach by creating a user | `UserRole.assignableRoles` — independent of, and narrower than, `manageUsers` |
 | Student identities are never silently merged | `student_dedupe` guard document + Unicode-safe key |
 | Audit logs are append-only, Super Admin included | Rules deny update and delete |
 | Nobody reads outside their geographic scope | Every collection's read rule, plus scope-derived queries |
-| The app shows no number it has not measured | The dashboard leaves assessment metrics blank until the phases that produce them exist |
+| The app shows no number it has not measured | Calibration shows an empty state; every preview screen carries a labelled band, enforced by a test |
+| A sync conflict is never auto-resolved | Three explicit choices only (Keep Server / Keep Local / Create Review Case); field roles may only escalate |
+
+---
+
+## 7. Known gaps
+
+Honest and current:
+
+1. **Sync reconciler's 4th step is deliberately deferred, not missed.**
+   Re-enqueuing an orphaned entity (a non-terminal entity with no queue
+   record) needs phase 5's capture flow to exist first — nothing today
+   writes an entity without also writing its queue entry in the same step, so
+   there is no code path that could produce an orphan to re-enqueue yet. The
+   other three steps (reset stuck `UPLOADING`, reset a crashed `PROCESSING`
+   submission, mark evidence missing) are built and tested.
+2. **Minor consistency items, not urgent**: `SyncQueueEntry.operation`/
+   `entityType` are bare `String`s where every comparable field elsewhere in
+   this codebase is a `wireName`-backed enum; `SyncConflictPolicy` checks a
+   raw `UserRole` comparison rather than going through the `Authorization`/
+   `Permission` mechanism every other gate in the app uses.

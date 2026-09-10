@@ -139,6 +139,53 @@ final class FirestoreOmrValidationDataSource implements OmrValidationDataSource 
     return ok(submission);
   }
 
+  /// A real deployment should never need this method to run against
+  /// Firestore at all: reconciliation is inherently about what *this device*
+  /// captured and never finished, which belongs in local storage
+  /// (`HiveAssessmentSessionStore` is the model to follow), not a remote
+  /// query. It exists here only because phase 5's capture flow — and the
+  /// local OMR store that comes with it — has not landed yet, so there is
+  /// nowhere else for this query to run, and is compiled but not yet
+  /// exercised, the same status every other Firestore data source in this
+  /// app ships in.
+  ///
+  /// Deliberately has no `capturedBy` filter — this class holds no current-
+  /// user id to filter by, and none of its other methods need one either.
+  /// The query is unscoped on the client; `firebase/firestore.rules`'
+  /// `omr_submissions` rule is what actually bounds a real caller to their
+  /// own scope or their own captures, per document, the same way every
+  /// `list` query in this app relies on the rule rather than a client
+  /// filter for enforcement.
+  @override
+  Future<Result<List<OmrSubmission>>> listCapturedOrProcessing() async {
+    final Result<QuerySnapshot<Map<String, dynamic>>> snapshot = await guardAsync(
+      () => _firestore
+          .collection(Collections.omrSubmissions)
+          .where(
+            'processingStatus',
+            whereIn: <String>['CAPTURED', 'PROCESSING'],
+          )
+          .get(),
+      onError: _mapFirestoreError,
+    );
+    return switch (snapshot) {
+      FailureResult<QuerySnapshot<Map<String, dynamic>>>(:final Failure failure) =>
+        err(failure),
+      Success<QuerySnapshot<Map<String, dynamic>>>(:final value) => ok(
+        value.docs
+            .map(
+              (QueryDocumentSnapshot<Map<String, dynamic>> doc) =>
+                  OmrSubmission.tryFromJson(<String, Object?>{
+                    ...doc.data(),
+                    'omrId': doc.id,
+                  }),
+            )
+            .whereType<OmrSubmission>()
+            .toList(growable: false),
+      ),
+    };
+  }
+
   @override
   Future<Result<Page<OmrSubmission>>> listSubmissionsForAssessment({
     required String assessmentId,
