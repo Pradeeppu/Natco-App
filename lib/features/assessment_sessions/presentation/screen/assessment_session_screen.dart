@@ -124,7 +124,9 @@ final class _Body extends ConsumerWidget {
           )
         else if (session.status.acceptsCapture)
           FilledButton.icon(
-            onPressed: () => context.push(RoutePaths.omrCapture),
+            onPressed: () => context.push(
+              '${RoutePaths.omrCapture}?sessionId=${session.sessionId}',
+            ),
             icon: const Icon(Icons.photo_camera_outlined),
             label: const Text('Capture next OMR'),
           ),

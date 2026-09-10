@@ -49,6 +49,7 @@ const List<String> _allRoutes = <String>[
   '/assessments/as_demo_baseline_g7/answer-key',
   '/assessment-session/ses_demo_1',
   RoutePaths.omrCapture,
+  '/omr/capture?sessionId=ses_demo_1',
   '/omr/review/0001827',
   RoutePaths.omrValidationQueue,
   '/omr/validation/0001827',

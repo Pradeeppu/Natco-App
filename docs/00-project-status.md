@@ -4,9 +4,12 @@ The single entry point: where the build is, how to run it, and what is left.
 The numbered documents that follow this one carry the depth; this one carries
 the state.
 
-**Status: 10 of 12 phases complete and tested; phase 5 partially built.**
-`flutter analyze` clean. **573 of 573 tests passing.** A release APK builds
-successfully end to end — see [§8](#8-building-a-release-apk).
+**Status: 10 of 12 phases complete and tested; phase 5's code is complete and
+untested on real hardware; phases 6 and 12 are blocked on a physical device
+and real scanned sheets.**
+`flutter analyze` clean. **576 of 576 tests passing.** A release APK builds
+and is signed with a **real release key**, verified with `apksigner` — see
+[§8](#8-building-a-release-apk).
 
 No OMR accuracy figure appears anywhere in this repository, because none has
 been measured yet (Critical Rule 14).
@@ -47,7 +50,7 @@ mark) — all sharing ids across features so nothing can drift apart.
 
 ```bash
 flutter analyze      # must be clean
-flutter test         # 544 tests, no device and no backend required
+flutter test         # 576 tests, no device and no backend required
 ```
 
 ### Building
@@ -220,9 +223,10 @@ this pass. What's real and tested:
   draining (`session → omr_submission → omr_answers → omr_validations →
   file uploads`), error classification into transient/permission/validation/
   conflict.
-- `SyncConflictPolicy` — Keep Server / Keep Local / Create Review Case, with
-  teachers and scanner operators restricted to escalating rather than
-  choosing a side.
+- `SyncConflictPolicy` — Keep Server / Keep Local / Create Review Case, gated
+  on `Authorization.can(Permission.resolveSyncConflict)` (not a hardcoded role
+  check) so anyone without that permission may only escalate, never choose a
+  side, on anything touching scores, validations or answers.
 - Real `/sync` screen: queue, retry, conflict cards, all live.
 - **The core exit criterion is proven, not just asserted**: a test simulates
   a server that processes a write and then drops the connection before the
@@ -288,11 +292,10 @@ access — cannot be verified without a device in this environment, so the
 reports screen shows the generated content in-app rather than claim a save
 succeeded that was never actually exercised.
 
-### Phase 5 — OMR capture ⚠️ partial (logic built and tested; the camera
-### screen itself is not)
+### Phase 5 — OMR capture ⚠️ code complete; unverified on real hardware
 
-The two pieces of Phase 5 that are pure logic — no camera, no platform
-channel — are real and tested:
+Every piece of this phase is now wired to real repositories and real device
+APIs. What is genuinely built:
 
 - **`ImageQualityAnalyzer`**: the actual image-quality gate, computing real
   blur (variance of Laplacian), brightness, contrast (5th-95th percentile
@@ -311,19 +314,48 @@ channel — are real and tested:
   directory as a parameter rather than calling `path_provider` itself, so
   the whole thing is testable with a fake file system — a real caller adds
   exactly one line, `(await getApplicationDocumentsDirectory()).path`.
+- **`OmrValidationRepository.createSubmission`**: the one create path for a
+  freshly captured sheet. Rejects a reused `omrId` — an in-memory map check
+  for demo/tests, a Firestore transaction guarded by `omr_registry/{omrId}`
+  for real — matching the same guard-document pattern `student_dedupe`
+  already uses (Critical Rule 7). Audits `OMR_CAPTURED`, and
+  `OMR_QUALITY_OVERRIDDEN` separately when a capturer forces past a failed
+  gate, so a reviewer can find every override without reading every capture.
+- **The real capture screen** (`OmrCaptureScreen`), reading `sessionId` from
+  the query string exactly like `ResultsScreen` reads `assessmentId`:
+  student picker from the session's pending roster, a manual OMR-ID field
+  (phase 6's automatic bubble-grid read does not exist yet, so a person
+  supplies it), capture-or-choose-from-gallery via `image_picker`, the real
+  quality gate rendered from `ImageQualityAnalyzer`'s actual verdict, "Use
+  anyway" gated by `Permission.overrideQualityGate` and recorded with a
+  reason, then the durable write followed by `createSubmission` and
+  `SessionRepository.attachOmr` in that order — so a crash between them loses
+  at most an unlinked database row, never the photographed evidence.
+  `AssessmentSessionScreen`'s "Capture next OMR" button now passes
+  `?sessionId=`.
+- Deliberately **not** a custom live camera preview
+  (`CameraController`/`package:camera`). `image_picker`'s camera source hands
+  the whole capture UI to the device's own camera app and hands back a file
+  — the same photo, one less custom camera lifecycle (orientation, focus,
+  disposal) to get wrong with no device here to catch a mistake in it. A
+  future iteration can build a live preview with framing guides if that
+  turns out to matter more than this simplification costs.
 
-**Not built**: the camera capture screen itself (`CameraController`, live
-preview, shutter) and manual OMR-ID entry. Camera integration needs a device
-to initialize and smoke-test — attempting it with zero ability to verify it
-actually works would produce code that *looks* complete but could have
-wiring bugs no widget test would catch, which is worse than being explicit
-that this piece is still open.
+**What is genuinely still open, and why it can only be closed on a device**:
+whether the device's camera app, `image_picker`'s plugin channel and the
+`CAMERA` runtime permission actually behave together the way the code
+assumes — a real photo through the real hardware path has never been taken.
+The Android manifest and iOS `Info.plist` now declare the permission/usage
+strings this needs; nobody has run the app on a phone to confirm it. Every
+widget test that pumps `/omr/capture?sessionId=...` exercises the real form
+(student picker, OMR-ID field, quality-gate rendering, save button) against
+the demo session — that proves the screen renders and does not crash under
+test, not that the camera hardware path works.
 
 ### Preview-only — not yet built behind real data
 
 | Screen | Route | Phase |
 |---|---|---|
-| Camera framing (screen itself; the quality gate behind it is real — see above) | `/omr/capture` | 5 |
 | Scan result with confidence breakdown | `/omr/review/:omrId` | 6 |
 | Scanner calibration and accuracy harness | `/settings/calibration` | 6 |
 
@@ -340,7 +372,7 @@ figure, because none has been measured (Critical Rule 14).
 
 | # | Phase | The gate | Why it's not fully done here |
 |---|---|---|---|
-| 5 | OMR capture | Image on disk before any processing; each quality failure has its own message; a kill mid-capture loses nothing | The quality gate and the durable write are built and tested (see above) — what's left is the camera screen itself, which needs a device to initialize and smoke-test |
+| 5 | OMR capture | Image on disk before any processing; each quality failure has its own message; a kill mid-capture loses nothing | All of it is built and wired to real repositories (see above) — what's left is running it on a real phone once to confirm the camera/permission plumbing behaves the way the code assumes |
 | 6 | OMR engine | Golden-dataset harness reports **measured** accuracy; an upside-down sheet is detected, not silently inverted | Needs real printed, scanned answer sheets with known-correct answers. Critical Rule 14 forbids inventing this number, so there is nothing to build against yet |
 | 12 | Hardening | Rules pass a deny-by-default review; performance budgets met on the reference device | Blocked on a physical device regardless of code state |
 
@@ -360,7 +392,7 @@ lib/
 │   ├── assessments · assessment_sessions                  (built)
 │   ├── omr_processing · omr_validation · results          (built — phases 7-8)
 │   ├── sync                                                (partial — phase 9)
-│   ├── omr_capture                                         (preview — phase 5)
+│   ├── omr_capture                                         (built — phase 5)
 │   ├── omr_processing/presentation (scan-result screen)    (preview — phase 6)
 │   └── analytics · reports · settings                      (preview — phases 10-11)
 └── data/        local (Hive) and remote (Firebase) implementations
@@ -405,11 +437,14 @@ Honest and current:
    there is no code path that could produce an orphan to re-enqueue yet. The
    other three steps (reset stuck `UPLOADING`, reset a crashed `PROCESSING`
    submission, mark evidence missing) are built and tested.
-2. **Minor consistency items, not urgent**: `SyncQueueEntry.operation`/
-   `entityType` are bare `String`s where every comparable field elsewhere in
-   this codebase is a `wireName`-backed enum; `SyncConflictPolicy` checks a
-   raw `UserRole` comparison rather than going through the `Authorization`/
-   `Permission` mechanism every other gate in the app uses.
+2. **Fixed since the last pass**: `SyncQueueEntry.operation`/`entityType` are
+   now `SyncOperation`/`SyncEntityType` enums, not bare strings; and
+   `SyncConflictPolicy` now checks
+   `Authorization.can(Permission.resolveSyncConflict)` rather than a
+   hardcoded `UserRole` comparison, matching every other gate in the app.
+3. **Phase 5's camera path has never run on a real device.** The code is
+   complete and the demo flow is exercised by widget tests, but nobody has
+   installed the app on a phone and taken an actual photo through it yet.
 
 ---
 
@@ -435,7 +470,20 @@ issues, not anything wrong with the project:
    template's default (36). Fixed by setting `compileSdk = 37` explicitly in
    `android/app/build.gradle.kts`.
 
-The resulting APK is signed with the **debug key** — fine to install and
-test today, but not eligible for a Play Store submission, which needs a real
-release signing key (`android/app/build.gradle.kts` still has the template's
-`// TODO: Add your own signing config` in place).
+The resulting APK is signed with a **real release key**
+(`android/keystore/natco-release.jks`, alias `natco_release`), not the debug
+key — `android/app/build.gradle.kts` reads `android/key.properties` and picks
+the real `signingConfigs.release` whenever that file exists, falling back to
+the debug key only on a checkout that has neither (so `flutter run --release`
+still works with no signing set up). Confirmed with the tool that actually
+reads an APK's v2/v3 signature — `apksigner verify --print-certs`, at
+`<Android SDK>/build-tools/<version>/apksigner.bat` — not `keytool
+-printcert -jarfile`, which reports "Not a signed jar file" against a
+correctly-signed APK because it only understands the older JAR signing
+scheme.
+
+**Both the keystore and `key.properties` are gitignored and exist only on
+this machine.** They are never committed, shared in chat or email, or backed
+up automatically. If this keystore is lost, no future release can be signed
+as an update to this same app identity — back it up somewhere secure and
+private, deliberately, before this machine's disk is the only copy.

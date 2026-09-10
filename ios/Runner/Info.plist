@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Used to capture OMR answer sheets during an assessment session.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Used to choose an already-photographed OMR answer sheet from your photos.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

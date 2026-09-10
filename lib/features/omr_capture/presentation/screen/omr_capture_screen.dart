@@ -1,354 +1,555 @@
-/// OMR capture: the camera framing screen and the quality gate that follows.
+/// OMR capture: durable capture, the image-quality gate, and a link to the
+/// session roster (phase 5).
 ///
-/// Design preview ahead of Phase 5. The viewfinder here is a mock — no camera
-/// is opened — but the framing guides, the check list and the three-way
-/// outcome are the real interaction being reviewed.
+/// Reads `sessionId` from the query string — the same convention
+/// `ResultsScreen` uses for `assessmentId` — because a sheet only means
+/// anything next to the session (and therefore the roster and ancestry) it
+/// was captured for; `AssessmentSessionScreen`'s "Capture next OMR" button is
+/// the one real entry point.
+///
+/// Two choices worth naming:
+///
+/// * There is no live camera preview here. `image_picker`'s camera source
+///   hands the whole capture UI to the device's own camera app and returns a
+///   file — one less custom camera lifecycle to get wrong, and the same
+///   photo either way. A future iteration can build a live preview with
+///   `package:camera` if framing guidance turns out to matter more than this
+///   simplification costs.
+/// * The OMR ID is typed by hand. Reading it off the sheet automatically is
+///   phase 6's job (bubble-grid decoding); until that pipeline exists, the
+///   person capturing is the only source for it.
+///
+/// The write order matters (Critical Rule 12): [OmrImageWriter] puts the
+/// photo durably on disk *before* [OmrValidationRepository.createSubmission]
+/// is ever called, so a crash between the two loses at most an unlinked
+/// database row, never the evidence.
 library;
+
+import 'dart:io' show Directory;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:natco_app/app/config/service_locator.dart';
-import 'package:natco_app/app/theme.dart';
-import 'package:natco_app/core/widgets/preview_kit.dart';
+import 'package:natco_app/core/errors/failure.dart';
+import 'package:natco_app/core/utils/result.dart';
+import 'package:natco_app/core/widgets/app_state_views.dart';
+import 'package:natco_app/features/assessment_sessions/domain/entity/assessment_session.dart';
+import 'package:natco_app/features/assessment_sessions/presentation/controller/session_controllers.dart';
+import 'package:natco_app/features/assessments/domain/entity/assessment.dart';
+import 'package:natco_app/features/assessments/presentation/controller/assessment_controllers.dart';
+import 'package:natco_app/features/auth/domain/entity/app_user.dart';
 import 'package:natco_app/features/auth/domain/entity/permission.dart';
-import 'package:natco_app/features/auth/presentation/controller/session_state.dart';
+import 'package:natco_app/features/omr_processing/domain/entity/image_quality_report.dart';
+import 'package:natco_app/features/omr_processing/domain/entity/omr_submission.dart';
+import 'package:natco_app/features/omr_processing/domain/service/image_quality_analyzer.dart';
+import 'package:natco_app/features/omr_processing/domain/service/omr_image_writer.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart' as ph;
 
-/// One line of the quality gate.
-final class _Check {
-  const _Check(this.label, this.passed, {this.detail});
-  final String label;
-  final bool passed;
-  final String? detail;
-}
-
-final class OmrCaptureScreen extends ConsumerStatefulWidget {
+final class OmrCaptureScreen extends ConsumerWidget {
   const OmrCaptureScreen({super.key});
 
   @override
-  ConsumerState<OmrCaptureScreen> createState() => _OmrCaptureScreenState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final String? sessionId = GoRouterState.of(
+      context,
+    ).uri.queryParameters['sessionId'];
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Capture OMR')),
+      body: SafeArea(
+        child: sessionId == null
+            ? const EmptyView(
+                title: 'No session selected',
+                message:
+                    'Open capture from an in-progress session so the sheet '
+                    'can be linked to the right student and roster.',
+                icon: Icons.link_off_outlined,
+              )
+            : _SessionLoader(sessionId: sessionId),
+      ),
+    );
+  }
 }
 
-class _OmrCaptureScreenState extends ConsumerState<OmrCaptureScreen> {
-  /// `null` before a capture, then the gate result being previewed.
-  bool? _passed;
+final class _SessionLoader extends ConsumerWidget {
+  const _SessionLoader({required this.sessionId});
+
+  final String sessionId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AsyncValue<AssessmentSession> session = ref.watch(
+      assessmentSessionProvider(sessionId),
+    );
+    return session.when(
+      loading: () => const LoadingView(),
+      error: (Object error, StackTrace _) => FailureView(
+        failure: asFailure(error),
+        onRetry: () => ref.invalidate(assessmentSessionProvider(sessionId)),
+      ),
+      data: (AssessmentSession value) {
+        if (!value.status.acceptsCapture) {
+          return EmptyView(
+            title: 'This session is ${value.status.displayName.toLowerCase()}',
+            message: value.status == SessionStatus.ready
+                ? 'Start the session before capturing sheets.'
+                : 'No more sheets can be captured for it.',
+            icon: Icons.block_outlined,
+          );
+        }
+        if (value.pendingCount == 0) {
+          return const EmptyView(
+            title: 'Every student is accounted for',
+            message: 'Nothing left on this roster to capture.',
+            icon: Icons.check_circle_outline,
+          );
+        }
+        return _CaptureBody(session: value);
+      },
+    );
+  }
+}
+
+final class _CaptureBody extends ConsumerStatefulWidget {
+  const _CaptureBody({required this.session});
+
+  final AssessmentSession session;
+
+  @override
+  ConsumerState<_CaptureBody> createState() => _CaptureBodyState();
+}
+
+class _CaptureBodyState extends ConsumerState<_CaptureBody> {
+  final TextEditingController _omrIdController = TextEditingController();
+  String? _studentId;
+  Uint8List? _imageBytes;
+  ImageQualityReport? _quality;
+  String? _overrideReason;
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _omrIdController.dispose();
+    super.dispose();
+  }
+
+  List<SessionRosterEntry> get _pending => widget.session.roster
+      .where((SessionRosterEntry e) => e.attendance == AttendanceState.pending)
+      .toList(growable: false);
+
+  bool get _canSubmit =>
+      !_busy &&
+      _studentId != null &&
+      _omrIdController.text.trim().isNotEmpty &&
+      _imageBytes != null &&
+      _quality != null &&
+      (_quality!.canProcess || _overrideReason != null);
 
   @override
   Widget build(BuildContext context) {
-    final SessionState session = ref.watch(sessionProvider);
-    final bool canOverride = session.authorization.can(
-      Permission.overrideQualityGate,
+    final AsyncValue<Assessment> assessment = ref.watch(
+      assessmentProvider(widget.session.assessmentId),
     );
-
-    return PreviewScaffold(
-      title: 'Capture OMR',
-      phase: 'Phase 5',
-      children: <Widget>[
-        if (_passed == null) ..._viewfinder() else ..._gate(canOverride),
-      ],
+    return assessment.when(
+      loading: () => const LoadingView(),
+      error: (Object error, StackTrace _) => FailureView(
+        failure: asFailure(error),
+        onRetry: () =>
+            ref.invalidate(assessmentProvider(widget.session.assessmentId)),
+      ),
+      data: _form,
     );
   }
 
-  List<Widget> _viewfinder() {
+  Widget _form(Assessment assessment) {
     final ThemeData theme = Theme.of(context);
-    return <Widget>[
-      const _ViewfinderMock(),
-      const SizedBox(height: 16),
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text('Align the sheet inside the frame',
-                  style: theme.textTheme.titleSmall),
-              const SizedBox(height: 10),
-              ...<String>[
-                'Keep all four corner markers visible',
-                'Avoid shadows falling across the sheet',
-                'Hold the phone steady and parallel to the page',
-              ].map(
-                (String tip) => Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Icon(
-                        Icons.check,
-                        size: 16,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(tip, style: theme.textTheme.bodySmall),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+    final bool canOverride = ref
+        .read(sessionProvider)
+        .authorization
+        .can(Permission.overrideQualityGate);
+
+    return AbsorbPointer(
+      absorbing: _busy,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: <Widget>[
+          Text('Grade ${widget.session.grade} - Section ${widget.session.section}',
+              style: theme.textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            '${widget.session.pendingCount} student'
+            '${widget.session.pendingCount == 1 ? '' : 's'} left to capture',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
-        ),
-      ),
-      const SizedBox(height: 20),
-      FilledButton.icon(
-        onPressed: () => setState(() => _passed = true),
-        icon: const Icon(Icons.camera_alt_outlined),
-        label: const Text('Capture'),
-      ),
-      const SizedBox(height: 10),
-      OutlinedButton.icon(
-        onPressed: () => setState(() => _passed = false),
-        icon: const Icon(Icons.photo_library_outlined),
-        label: const Text('Choose from gallery'),
-      ),
-      const SizedBox(height: 12),
-      Text(
-        'Both buttons show a sample gate result — Capture previews a pass, '
-        'gallery previews a failure.',
-        textAlign: TextAlign.center,
-        style: theme.textTheme.bodySmall?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      ),
-    ];
-  }
-
-  List<Widget> _gate(bool canOverride) {
-    final ThemeData theme = Theme.of(context);
-    final NatcoStatusColors status = theme.statusColors;
-    final bool passed = _passed ?? false;
-
-    final List<_Check> checks = passed
-        ? const <_Check>[
-            _Check('Sheet detected', true),
-            _Check('Four registration markers found', true),
-            _Check('Orientation correct', true),
-            _Check('Focus', true, detail: 'Sharp'),
-            _Check('Lighting', true, detail: 'Even'),
-            _Check('OMR ID read', true, detail: '0001827'),
-          ]
-        : const <_Check>[
-            _Check('Sheet detected', true),
-            _Check('Four registration markers found', false,
-                detail: 'Only 3 found — bottom-left corner is cut off'),
-            _Check('Orientation correct', true),
-            _Check('Focus', true, detail: 'Sharp'),
-            _Check('Lighting', false, detail: 'Too dark on the right edge'),
-            _Check('OMR ID read', false, detail: 'Not legible'),
-          ];
-
-    return <Widget>[
-      Card(
-        color: passed ? status.successContainer : status.dangerContainer,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: <Widget>[
-              Icon(
-                passed ? Icons.check_circle_outline : Icons.error_outline,
-                color: passed ? status.success : status.danger,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      passed ? 'Ready to process' : 'Scan failed',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: passed ? status.success : status.danger,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      passed
-                          ? 'The sheet is readable. Processing runs on this '
-                                'device.'
-                          : 'Two checks did not pass. Please retake the '
-                                'photograph.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: passed ? status.success : status.danger,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-      const SizedBox(height: 20),
-      PreviewSection(
-        title: 'Image quality',
-        child: PreviewListCard(
-          children: previewDivided(
-            checks
+          const SizedBox(height: 20),
+          DropdownButtonFormField<String>(
+            initialValue: _studentId,
+            decoration: const InputDecoration(labelText: 'Student'),
+            items: _pending
                 .map(
-                  (_Check c) => ListTile(
-                    leading: Icon(
-                      c.passed ? Icons.check_circle : Icons.cancel,
-                      color: c.passed ? status.success : status.danger,
-                      size: 20,
-                    ),
-                    title: Text(c.label),
-                    subtitle: c.detail == null ? null : Text(c.detail!),
-                    dense: true,
+                  (SessionRosterEntry e) => DropdownMenuItem<String>(
+                    value: e.studentId,
+                    child: Text(e.studentName),
                   ),
                 )
                 .toList(growable: false),
+            onChanged: _busy ? null : (String? v) => setState(() => _studentId = v),
           ),
-        ),
-      ),
-      if (passed)
-        FilledButton.icon(
-          onPressed: () {},
-          icon: const Icon(Icons.auto_awesome_outlined),
-          label: const Text('Process sheet'),
-        )
-      else ...<Widget>[
-        FilledButton.icon(
-          onPressed: () => setState(() => _passed = null),
-          icon: const Icon(Icons.refresh),
-          label: const Text('Retake'),
-        ),
-        const SizedBox(height: 10),
-        OutlinedButton(
-          onPressed: canOverride ? () {} : null,
-          child: const Text('Use anyway'),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          canOverride
-              ? 'Your role may waive the gate. The waiver is recorded against '
-                    'you with a reason.'
-              : 'Only a Supervisor may waive the quality gate. Retake the '
-                    'photograph instead.',
-          textAlign: TextAlign.center,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
-      const SizedBox(height: 10),
-      TextButton(
-        onPressed: () => setState(() => _passed = null),
-        child: const Text('Cancel'),
-      ),
-      const SizedBox(height: 20),
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            'Phase 5 writes the original image to the device before any of '
-            'this runs, so killing the app mid-capture loses nothing. The '
-            'original is kept as evidence and can never be replaced or '
-            'deleted by a client.',
-            style: theme.textTheme.bodyMedium,
-          ),
-        ),
-      ),
-    ];
-  }
-}
-
-/// A drawn stand-in for the camera preview: an OMR sheet inside framing
-/// guides, with the four registration markers the pipeline looks for.
-final class _ViewfinderMock extends StatelessWidget {
-  const _ViewfinderMock();
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    return AspectRatio(
-      aspectRatio: 3 / 4,
-      child: Container(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.inverseSurface,
-          borderRadius: const BorderRadius.all(Radius.circular(16)),
-        ),
-        child: Stack(
-          fit: StackFit.expand,
-          children: <Widget>[
-            Center(
-              child: FractionallySizedBox(
-                widthFactor: 0.78,
-                heightFactor: 0.84,
-                child: CustomPaint(painter: _SheetPainter(theme)),
-              ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _omrIdController,
+            decoration: const InputDecoration(
+              labelText: 'OMR ID',
+              helperText: 'Printed on the sheet — read it by hand for now.',
             ),
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 12,
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surface.withValues(alpha: 0.9),
-                    borderRadius: const BorderRadius.all(Radius.circular(20)),
-                  ),
-                  child: Text(
-                    'Sheet detected · 4 markers',
-                    style: theme.textTheme.bodySmall,
-                  ),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 20),
+          if (_imageBytes == null) ..._captureButtons() else ..._preview(theme),
+          if (_quality != null) ...<Widget>[
+            const SizedBox(height: 20),
+            _qualityCard(theme, canOverride),
+          ],
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: _canSubmit ? () => _submit(assessment) : null,
+            icon: _busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save_outlined),
+            label: Text(_busy ? 'Saving...' : 'Save capture'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _captureButtons() => <Widget>[
+    FilledButton.icon(
+      onPressed: _busy ? null : () => _pickImage(ImageSource.camera),
+      icon: const Icon(Icons.camera_alt_outlined),
+      label: const Text('Capture'),
+    ),
+    const SizedBox(height: 10),
+    OutlinedButton.icon(
+      onPressed: _busy ? null : () => _pickImage(ImageSource.gallery),
+      icon: const Icon(Icons.photo_library_outlined),
+      label: const Text('Choose from gallery'),
+    ),
+  ];
+
+  List<Widget> _preview(ThemeData theme) => <Widget>[
+    ClipRRect(
+      borderRadius: const BorderRadius.all(Radius.circular(12)),
+      child: Image.memory(_imageBytes!, fit: BoxFit.contain),
+    ),
+    const SizedBox(height: 10),
+    OutlinedButton.icon(
+      onPressed: _busy
+          ? null
+          : () => setState(() {
+              _imageBytes = null;
+              _quality = null;
+              _overrideReason = null;
+            }),
+      icon: const Icon(Icons.refresh),
+      label: const Text('Retake'),
+    ),
+  ];
+
+  Widget _qualityCard(ThemeData theme, bool canOverride) {
+    final ImageQualityReport quality = _quality!;
+    final bool passed = quality.canProcess;
+    final Color color = passed
+        ? theme.colorScheme.primary
+        : theme.colorScheme.error;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(
+                  passed ? Icons.check_circle_outline : Icons.error_outline,
+                  color: color,
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  passed ? 'Image quality: pass' : 'Image quality: fail',
+                  style: theme.textTheme.titleSmall?.copyWith(color: color),
+                ),
+              ],
+            ),
+            if (quality.failureReasons.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 8),
+              ...quality.failureReasons.map(
+                (String reason) => Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(reason, style: theme.textTheme.bodySmall),
                 ),
               ),
-            ),
+            ],
+            if (!passed) ...<Widget>[
+              const SizedBox(height: 12),
+              if (_overrideReason != null)
+                Text(
+                  'Overridden: $_overrideReason',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontStyle: FontStyle.italic,
+                  ),
+                )
+              else
+                OutlinedButton(
+                  onPressed: canOverride ? _confirmOverride : null,
+                  child: const Text('Use anyway'),
+                ),
+              if (_overrideReason == null) ...<Widget>[
+                const SizedBox(height: 6),
+                Text(
+                  canOverride
+                      ? 'Your role may waive the gate. The waiver is '
+                            'recorded against you with a reason.'
+                      : 'Only a Supervisor may waive the quality gate. '
+                            'Retake the photograph instead.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ],
           ],
         ),
       ),
     );
   }
-}
 
-class _SheetPainter extends CustomPainter {
-  _SheetPainter(this.theme);
-
-  final ThemeData theme;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint sheet = Paint()..color = theme.colorScheme.onInverseSurface;
-    final RRect body = RRect.fromRectAndRadius(
-      Offset.zero & size,
-      const Radius.circular(4),
+  Future<void> _confirmOverride() async {
+    final String? reason = await showDialog<String>(
+      context: context,
+      builder: (_) => const _OverrideReasonDialog(),
     );
-    canvas.drawRRect(body, sheet);
+    if (reason == null || reason.isEmpty || !mounted) {
+      return;
+    }
+    setState(() => _overrideReason = reason);
+  }
 
-    // Four registration markers, one per corner.
-    final Paint marker = Paint()..color = theme.colorScheme.inverseSurface;
-    const double m = 12;
-    const double inset = 10;
-    for (final Offset corner in <Offset>[
-      const Offset(inset, inset),
-      Offset(size.width - inset - m, inset),
-      Offset(inset, size.height - inset - m),
-      Offset(size.width - inset - m, size.height - inset - m),
-    ]) {
-      canvas.drawRect(corner & const Size(m, m), marker);
+  Future<void> _pickImage(ImageSource source) async {
+    if (source == ImageSource.camera) {
+      final ph.PermissionStatus status = await ph.Permission.camera.request();
+      if (!status.isGranted) {
+        _showMessage(
+          'Camera permission is required to capture a sheet. Enable it in '
+          'Settings.',
+        );
+        return;
+      }
     }
 
-    // Suggestion of bubble rows, so the frame reads as an OMR sheet.
-    final Paint bubble = Paint()
-      ..color = theme.colorScheme.inverseSurface.withValues(alpha: 0.35)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.4;
-    final double top = size.height * 0.26;
-    final double rowGap = (size.height * 0.62) / 11;
-    for (int row = 0; row < 11; row++) {
-      for (int col = 0; col < 4; col++) {
-        canvas.drawCircle(
-          Offset(size.width * (0.30 + col * 0.16), top + row * rowGap),
-          4.2,
-          bubble,
-        );
+    XFile? file;
+    try {
+      file = await ImagePicker().pickImage(source: source, imageQuality: 90);
+    } catch (_) {
+      _showMessage(
+        source == ImageSource.camera
+            ? 'Could not open the camera on this device. Try the gallery '
+                  'instead.'
+            : 'Could not open the gallery on this device.',
+      );
+      return;
+    }
+    if (file == null || !mounted) {
+      return; // Cancelled — not an error.
+    }
+
+    final Uint8List bytes = await file.readAsBytes();
+    final Result<ImageQualityReport> result = ImageQualityAnalyzer.analyze(
+      imageBytes: bytes,
+    );
+    if (!mounted) {
+      return;
+    }
+    result.fold(
+      onSuccess: (ImageQualityReport report) => setState(() {
+        _imageBytes = bytes;
+        _quality = report;
+        _overrideReason = null;
+      }),
+      onFailure: (Failure failure) => _showMessage(failure.userMessage),
+    );
+  }
+
+  Future<void> _submit(Assessment assessment) async {
+    final String? studentId = _studentId;
+    final String omrId = _omrIdController.text.trim();
+    final Uint8List? bytes = _imageBytes;
+    final ImageQualityReport? quality = _quality;
+    if (studentId == null || omrId.isEmpty || bytes == null || quality == null) {
+      return;
+    }
+    final AppUser? actor = ref.read(sessionProvider).authorization.user;
+    if (actor == null) {
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      // Written to disk before anything else touches it (Critical Rule 12) —
+      // the evidence exists whether or not the rest of this method succeeds.
+      final Directory documentsDir = await getApplicationDocumentsDirectory();
+      final Result<String> written = await OmrImageWriter.writeCapturedImage(
+        fileSystem: ref.read(fileSystemServiceProvider),
+        documentsRootPath: documentsDir.path,
+        imageBytes: bytes,
+        academicYear: assessment.academicYear,
+        assessmentId: widget.session.assessmentId,
+        stateId: widget.session.stateId,
+        districtId: widget.session.districtId,
+        clusterId: widget.session.clusterId,
+        schoolId: widget.session.schoolId,
+        capturedAt: DateTime.now(),
+        omrId: omrId,
+      );
+      if (written.isFailure) {
+        _showMessage(written.failureOrNull!.userMessage);
+        return;
+      }
+
+      final Result<OmrSubmission> created = await ref
+          .read(omrValidationRepositoryProvider)
+          .createSubmission(
+            omrId: omrId,
+            sessionId: widget.session.sessionId,
+            assessmentId: widget.session.assessmentId,
+            studentId: studentId,
+            schoolId: widget.session.schoolId,
+            clusterId: widget.session.clusterId,
+            districtId: widget.session.districtId,
+            stateId: widget.session.stateId,
+            capturedBy: actor.userId,
+            actorRole: actor.role.wireName,
+            originalImagePath: written.valueOrNull!,
+            imageQuality: quality,
+            qualityOverrideBy: _overrideReason == null ? null : actor.userId,
+            qualityOverrideReason: _overrideReason,
+          );
+      if (created.isFailure) {
+        // The image is still safely on disk even though this row was
+        // refused (most likely a re-used OMR ID) — nothing is lost, the
+        // capturer just needs to correct the ID and save again.
+        _showMessage(created.failureOrNull!.userMessage);
+        return;
+      }
+
+      final Result<AssessmentSession> attached = await ref
+          .read(sessionRepositoryProvider)
+          .attachOmr(
+            widget.session.sessionId,
+            studentId: studentId,
+            omrId: omrId,
+            actorUserId: actor.userId,
+            actorRole: actor.role.wireName,
+          );
+      if (!mounted) {
+        return;
+      }
+      ref.invalidate(assessmentSessionProvider(widget.session.sessionId));
+      attached.fold(
+        onSuccess: (_) => _showMessage('Captured. Ready for the next student.'),
+        onFailure: (Failure failure) => _showMessage(
+          'Captured, but the roster could not be updated: '
+          '${failure.userMessage}',
+        ),
+      );
+      setState(() {
+        _studentId = null;
+        _omrIdController.clear();
+        _imageBytes = null;
+        _quality = null;
+        _overrideReason = null;
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
       }
     }
   }
 
+  void _showMessage(String message) {
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
+final class _OverrideReasonDialog extends StatefulWidget {
+  const _OverrideReasonDialog();
+
   @override
-  bool shouldRepaint(covariant _SheetPainter oldDelegate) => false;
+  State<_OverrideReasonDialog> createState() => _OverrideReasonDialogState();
+}
+
+class _OverrideReasonDialogState extends State<_OverrideReasonDialog> {
+  final TextEditingController _controller = TextEditingController();
+  bool _touched = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool empty = _controller.text.trim().isEmpty;
+    return AlertDialog(
+      title: const Text('Use this sheet anyway?'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text(
+            'This sheet failed the image-quality gate. Waiving it is '
+            'recorded against you with the reason below.',
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: 'Reason',
+              errorText: _touched && empty ? 'Enter a reason.' : null,
+            ),
+            onChanged: (_) => setState(() => _touched = true),
+          ),
+        ],
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: empty
+              ? null
+              : () => Navigator.of(context).pop(_controller.text.trim()),
+          child: const Text('Use anyway'),
+        ),
+      ],
+    );
+  }
 }

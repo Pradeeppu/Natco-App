@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Capturing an OMR sheet (phase 5). Gallery selection uses the Android
+         photo picker via image_picker and needs no storage permission. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
     <application
         android:label="natco_app"
         android:name="${applicationName}"

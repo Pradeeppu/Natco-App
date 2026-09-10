@@ -22,7 +22,6 @@ import 'test_harness.dart';
 
 /// Routes still showing sample data, with the phase that makes them real.
 const Map<String, String> _previewRoutes = <String, String>{
-  RoutePaths.omrCapture: 'Phase 5',
   RoutePaths.calibration: 'Phase 6',
 };
 
@@ -36,6 +35,8 @@ const List<String> _realRoutes = <String>[
   '/assessments/as_demo_baseline_g5',
   '/assessments/as_demo_baseline_g5/answer-key',
   '/assessment-session/ses_demo_1',
+  RoutePaths.omrCapture,
+  '/omr/capture?sessionId=ses_demo_1',
   RoutePaths.settings,
   RoutePaths.omrValidationQueue,
   '/omr/validation/0001827',
