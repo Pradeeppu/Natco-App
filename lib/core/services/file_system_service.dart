@@ -17,6 +17,9 @@ abstract interface class FileSystemService {
   /// this call returns, not merely handed to a buffer that a kill a moment
   /// later could still lose.
   Future<void> writeBytes(String path, Uint8List bytes);
+
+  /// Reads the entire file at [path] into memory.
+  Future<Uint8List> readBytes(String path);
 }
 
 /// Real implementation using `dart:io`.
@@ -34,6 +37,11 @@ final class PlatformFileSystemService implements FileSystemService {
     // returning as soon as the OS buffer accepts it — the difference between
     // "durable" and "probably fine".
     await file.writeAsBytes(bytes, flush: true);
+  }
+
+  @override
+  Future<Uint8List> readBytes(String path) async {
+    return await File(path).readAsBytes();
   }
 }
 
@@ -58,11 +66,23 @@ final class FakeFileSystemService implements FileSystemService {
   /// them, not merely that a write was attempted.
   Uint8List? bytesWrittenTo(String path) => _writtenBytes[path];
 
-  void addFile(String path) {
+  void addFile(String path, {Uint8List? bytes}) {
     _existingFiles.add(path);
+    if (bytes != null) {
+      _writtenBytes[path] = bytes;
+    }
   }
 
   void removeFile(String path) {
     _existingFiles.remove(path);
+    _writtenBytes.remove(path);
+  }
+
+  @override
+  Future<Uint8List> readBytes(String path) async {
+    if (!_existingFiles.contains(path)) {
+      throw const FileSystemException('File not found', 'Fake path');
+    }
+    return _writtenBytes[path] ?? Uint8List(0);
   }
 }

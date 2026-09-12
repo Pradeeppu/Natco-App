@@ -19,6 +19,7 @@ import 'package:natco_app/features/sync/domain/entity/sync_queue_entry.dart';
 import 'package:natco_app/features/sync/domain/entity/sync_status.dart';
 import 'package:natco_app/features/sync/domain/service/sync_conflict_policy.dart';
 import 'package:natco_app/features/sync/domain/service/sync_reconciler.dart';
+import '../../dummy_sync.dart';
 
 final class _InMemoryQueueDataSource implements SyncQueueDataSource {
   final Map<String, SyncQueueEntry> _entries = <String, SyncQueueEntry>{};
@@ -93,6 +94,8 @@ void main() {
   void buildWith(List<OmrSubmission> submissions) {
     omrDataSource = InMemoryOmrValidationDataSource(submissions: submissions);
     omrRepository = OmrValidationRepositoryImpl(
+      fileSystem: fileSystem,
+      syncQueue: DummySyncQueueRepository(),
       dataSource: omrDataSource,
       auditSink: InMemoryAuditSink(),
       idGenerator: const UuidIdGenerator(),

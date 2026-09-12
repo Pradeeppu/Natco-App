@@ -21,6 +21,7 @@ import 'package:natco_app/features/auth/domain/entity/access_scope.dart';
 import 'package:natco_app/features/omr_processing/domain/entity/image_quality_report.dart';
 import 'package:natco_app/features/omr_processing/domain/entity/omr_answer.dart';
 import 'package:natco_app/features/omr_processing/domain/entity/omr_submission.dart';
+import 'package:natco_app/features/omr_processing/domain/entity/omr_template.dart';
 import 'package:natco_app/features/omr_validation/domain/entity/omr_validation_record.dart';
 
 abstract interface class OmrValidationRepository {
@@ -145,5 +146,14 @@ abstract interface class OmrValidationRepository {
     required ImageQualityReport imageQuality,
     String? qualityOverrideBy,
     String? qualityOverrideReason,
+  });
+
+  /// Processes a `CAPTURED` submission using the OMR engine in a background
+  /// isolate, writes the generated `OmrAnswer` records, and updates the
+  /// submission status to `PROCESSED` or `NEEDS_VALIDATION`.
+  Future<Result<OmrSubmission>> processSubmission(
+    String omrId, {
+    required OmrTemplate template,
+    required int questionCount,
   });
 }

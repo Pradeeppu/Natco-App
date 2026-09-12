@@ -72,6 +72,7 @@ import 'package:natco_app/features/students/domain/repository/student_repository
 import 'package:natco_app/features/sync/data/repository/sync_queue_repository_impl.dart';
 import 'package:natco_app/features/sync/data/service/hive_sync_queue_data_source.dart';
 import 'package:natco_app/features/sync/data/service/in_memory_sync_backend_service.dart';
+import 'package:natco_app/features/sync/data/service/in_memory_sync_queue_data_source.dart';
 import 'package:natco_app/features/sync/data/service/sync_queue_data_source.dart';
 import 'package:natco_app/features/sync/domain/repository/sync_queue_repository.dart';
 import 'package:natco_app/features/sync/domain/service/sync_conflict_policy.dart';
@@ -321,6 +322,7 @@ final Provider<SessionRepository> sessionRepositoryProvider =
         assessmentRepository: ref.watch(assessmentRepositoryProvider),
         schoolRepository: ref.watch(schoolHierarchyRepositoryProvider),
         studentRepository: ref.watch(studentRepositoryProvider),
+        syncQueue: ref.watch(syncQueueRepositoryProvider),
         auditSink: ref.watch(auditSinkProvider),
         idGenerator: ref.watch(idGeneratorProvider),
         clock: ref.watch(clockProvider),
@@ -382,6 +384,10 @@ final Provider<FileSystemService> fileSystemServiceProvider =
 
 final Provider<SyncQueueDataSource> syncQueueDataSourceProvider =
     Provider<SyncQueueDataSource>((Ref ref) {
+      final AppConfig config = ref.watch(appConfigProvider);
+      if (!config.environment.usesFirebase) {
+        return InMemorySyncQueueDataSource();
+      }
       // Requires Hive box 'sync_queue' to be opened during init.
       return HiveSyncQueueDataSource(ref.watch(hiveProvider).box<dynamic>('sync_queue'));
     });
@@ -446,6 +452,8 @@ final Provider<OmrValidationRepository> omrValidationRepositoryProvider =
     Provider<OmrValidationRepository>(
       (Ref ref) => OmrValidationRepositoryImpl(
         dataSource: ref.watch(omrValidationDataSourceProvider),
+        syncQueue: ref.watch(syncQueueRepositoryProvider),
+        fileSystem: ref.watch(fileSystemServiceProvider),
         auditSink: ref.watch(auditSinkProvider),
         idGenerator: ref.watch(idGeneratorProvider),
         clock: ref.watch(clockProvider),

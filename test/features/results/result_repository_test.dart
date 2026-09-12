@@ -7,6 +7,7 @@ library;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:natco_app/core/services/audit_sink.dart';
 import 'package:natco_app/core/services/device_info_service.dart';
+import 'package:natco_app/core/services/file_system_service.dart';
 import 'package:natco_app/core/utils/clock.dart';
 import 'package:natco_app/core/utils/id_generator.dart';
 import 'package:natco_app/core/utils/result.dart';
@@ -33,6 +34,8 @@ import 'package:natco_app/features/students/data/repository/student_repository_i
 import 'package:natco_app/features/students/data/service/in_memory_student_data_source.dart';
 import 'package:natco_app/features/students/domain/repository/student_repository.dart';
 
+import '../../dummy_sync.dart';
+
 void main() {
   late InMemoryResultDataSource resultDataSource;
   late InMemoryOmrValidationDataSource omrDataSource;
@@ -50,6 +53,8 @@ void main() {
     );
     auditSink = InMemoryAuditSink();
     omrRepository = OmrValidationRepositoryImpl(
+      fileSystem: FakeFileSystemService(),
+      syncQueue: DummySyncQueueRepository(),
       dataSource: omrDataSource,
       auditSink: auditSink,
       idGenerator: const UuidIdGenerator(),
@@ -83,6 +88,7 @@ void main() {
       deviceInfo: const StaticDeviceInfoService(),
     );
     sessionRepository = SessionRepositoryImpl(
+      syncQueue: DummySyncQueueRepository(),
       store: InMemoryAssessmentSessionStore(sessions: demoSessions()),
       assessmentRepository: assessmentRepository,
       schoolRepository: schoolRepository,

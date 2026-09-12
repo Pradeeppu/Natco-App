@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:natco_app/core/pagination/page.dart';
 import 'package:natco_app/core/services/audit_sink.dart';
 import 'package:natco_app/core/services/device_info_service.dart';
+import 'package:natco_app/core/services/file_system_service.dart';
 import 'package:natco_app/core/utils/clock.dart';
 import 'package:natco_app/core/utils/id_generator.dart';
 import 'package:natco_app/core/utils/result.dart';
@@ -18,6 +19,8 @@ import 'package:natco_app/features/omr_validation/data/service/in_memory_omr_val
 import 'package:natco_app/features/omr_validation/domain/entity/omr_validation_record.dart';
 import 'package:natco_app/features/omr_validation/domain/service/omr_validation_policy.dart';
 import 'package:natco_app/features/schools/data/service/demo_master_data.dart';
+
+import '../../dummy_sync.dart';
 
 void main() {
   group('OmrValidationPolicy', () {
@@ -74,6 +77,8 @@ void main() {
       );
       auditSink = InMemoryAuditSink();
       repository = OmrValidationRepositoryImpl(
+      fileSystem: FakeFileSystemService(),
+      syncQueue: DummySyncQueueRepository(),
         dataSource: dataSource,
         auditSink: auditSink,
         idGenerator: const UuidIdGenerator(),

@@ -5,6 +5,7 @@ library;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:natco_app/core/services/audit_sink.dart';
 import 'package:natco_app/core/services/device_info_service.dart';
+import 'package:natco_app/core/services/file_system_service.dart';
 import 'package:natco_app/core/utils/clock.dart';
 import 'package:natco_app/core/utils/id_generator.dart';
 import 'package:natco_app/core/utils/result.dart';
@@ -43,6 +44,8 @@ import 'package:natco_app/features/sync/domain/entity/sync_status.dart';
 import 'package:natco_app/features/sync/domain/repository/sync_queue_repository.dart';
 import 'package:natco_app/features/sync/domain/service/sync_conflict_policy.dart';
 
+import '../../dummy_sync.dart';
+
 final class _InMemoryQueueDataSource implements SyncQueueDataSource {
   final Map<String, SyncQueueEntry> _entries = <String, SyncQueueEntry>{};
 
@@ -79,6 +82,8 @@ void main() {
   setUp(() async {
     auditSink = InMemoryAuditSink();
     omrRepository = OmrValidationRepositoryImpl(
+      fileSystem: FakeFileSystemService(),
+      syncQueue: DummySyncQueueRepository(),
       dataSource: InMemoryOmrValidationDataSource(
         submissions: demoOmrSubmissions(),
         answers: demoOmrAnswers(),
@@ -119,6 +124,7 @@ void main() {
       deviceInfo: const StaticDeviceInfoService(),
     );
     final SessionRepository sessionRepository = SessionRepositoryImpl(
+      syncQueue: DummySyncQueueRepository(),
       store: InMemoryAssessmentSessionStore(sessions: demoSessions()),
       assessmentRepository: assessmentRepository,
       schoolRepository: schoolRepository,

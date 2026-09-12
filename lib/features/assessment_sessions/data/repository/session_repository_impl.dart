@@ -24,6 +24,9 @@ import 'package:natco_app/features/schools/domain/entity/school.dart';
 import 'package:natco_app/features/schools/domain/repository/school_hierarchy_repository.dart';
 import 'package:natco_app/features/students/domain/entity/student.dart';
 import 'package:natco_app/features/students/domain/repository/student_repository.dart';
+import 'package:natco_app/features/sync/domain/entity/sync_queue_entry.dart';
+import 'package:natco_app/features/sync/domain/entity/sync_status.dart';
+import 'package:natco_app/features/sync/domain/repository/sync_queue_repository.dart';
 
 final class SessionRepositoryImpl implements SessionRepository {
   SessionRepositoryImpl({
@@ -31,6 +34,7 @@ final class SessionRepositoryImpl implements SessionRepository {
     required AssessmentRepository assessmentRepository,
     required SchoolHierarchyRepository schoolRepository,
     required StudentRepository studentRepository,
+    required SyncQueueRepository syncQueue,
     required AuditSink auditSink,
     required IdGenerator idGenerator,
     required Clock clock,
@@ -39,6 +43,7 @@ final class SessionRepositoryImpl implements SessionRepository {
        _assessmentRepository = assessmentRepository,
        _schoolRepository = schoolRepository,
        _studentRepository = studentRepository,
+       _syncQueue = syncQueue,
        _auditSink = auditSink,
        _idGenerator = idGenerator,
        _clock = clock,
@@ -48,6 +53,7 @@ final class SessionRepositoryImpl implements SessionRepository {
   final AssessmentRepository _assessmentRepository;
   final SchoolHierarchyRepository _schoolRepository;
   final StudentRepository _studentRepository;
+  final SyncQueueRepository _syncQueue;
   final AuditSink _auditSink;
   final IdGenerator _idGenerator;
   final Clock _clock;
@@ -189,6 +195,19 @@ final class SessionRepositoryImpl implements SessionRepository {
 
     final Result<AssessmentSession> written = await _store.write(session);
     if (written.isSuccess) {
+      await _syncQueue.enqueue(
+        SyncQueueEntry(
+          syncId: _idGenerator.newId(),
+          entityType: SyncEntityType.assessmentSession,
+          entityId: session.sessionId,
+          operation: SyncOperation.create,
+          payloadRef: 'local/sessions/${session.sessionId}',
+          idempotencyKey: 'create_session_${session.sessionId}',
+          createdAt: now,
+          attemptCount: 0,
+          status: SyncStatus.pending,
+        ),
+      );
       await _record(
         AuditAction.sessionCreated,
         session.sessionId,
@@ -291,6 +310,19 @@ final class SessionRepositoryImpl implements SessionRepository {
 
     final Result<AssessmentSession> written = await _store.write(updated);
     if (written.isSuccess) {
+      await _syncQueue.enqueue(
+        SyncQueueEntry(
+          syncId: _idGenerator.newId(),
+          entityType: SyncEntityType.assessmentSession,
+          entityId: sessionId,
+          operation: SyncOperation.update,
+          payloadRef: 'local/sessions/$sessionId',
+          idempotencyKey: 'update_session_${sessionId}_status_${next.wireName}',
+          createdAt: now,
+          attemptCount: 0,
+          status: SyncStatus.pending,
+        ),
+      );
       await _record(
         next == SessionStatus.abandoned
             ? AuditAction.sessionAbandoned
@@ -368,6 +400,19 @@ final class SessionRepositoryImpl implements SessionRepository {
       current.copyWith(roster: roster, updatedAt: _clock.nowUtc()),
     );
     if (written.isSuccess) {
+      await _syncQueue.enqueue(
+        SyncQueueEntry(
+          syncId: _idGenerator.newId(),
+          entityType: SyncEntityType.assessmentSession,
+          entityId: sessionId,
+          operation: SyncOperation.update,
+          payloadRef: 'local/sessions/$sessionId',
+          idempotencyKey: 'update_session_${sessionId}_attendance_$studentId',
+          createdAt: _clock.nowUtc(),
+          attemptCount: 0,
+          status: SyncStatus.pending,
+        ),
+      );
       await _record(
         AuditAction.sessionAttendanceMarked,
         sessionId,
@@ -424,9 +469,25 @@ final class SessionRepositoryImpl implements SessionRepository {
               : e,
         )
         .toList(growable: false);
-    return _store.write(
+    final Result<AssessmentSession> written = await _store.write(
       current.copyWith(roster: roster, updatedAt: _clock.nowUtc()),
     );
+    if (written.isSuccess) {
+      await _syncQueue.enqueue(
+        SyncQueueEntry(
+          syncId: _idGenerator.newId(),
+          entityType: SyncEntityType.assessmentSession,
+          entityId: sessionId,
+          operation: SyncOperation.update,
+          payloadRef: 'local/sessions/$sessionId',
+          idempotencyKey: 'update_session_${sessionId}_omr_$studentId',
+          createdAt: _clock.nowUtc(),
+          attemptCount: 0,
+          status: SyncStatus.pending,
+        ),
+      );
+    }
+    return written;
   }
 
   Future<void> _record(

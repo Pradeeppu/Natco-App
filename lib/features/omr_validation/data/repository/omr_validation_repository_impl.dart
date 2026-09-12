@@ -5,10 +5,13 @@
 /// `StudentRepositoryImpl`.
 library;
 
+import 'package:flutter/foundation.dart';
+import 'package:image/image.dart' as img;
 import 'package:natco_app/core/errors/failure.dart';
 import 'package:natco_app/core/pagination/page.dart';
 import 'package:natco_app/core/services/audit_sink.dart';
 import 'package:natco_app/core/services/device_info_service.dart';
+import 'package:natco_app/core/services/file_system_service.dart';
 import 'package:natco_app/core/utils/clock.dart';
 import 'package:natco_app/core/utils/id_generator.dart';
 import 'package:natco_app/core/utils/result.dart';
@@ -16,10 +19,15 @@ import 'package:natco_app/features/auth/domain/entity/access_scope.dart';
 import 'package:natco_app/features/omr_processing/domain/entity/image_quality_report.dart';
 import 'package:natco_app/features/omr_processing/domain/entity/omr_answer.dart';
 import 'package:natco_app/features/omr_processing/domain/entity/omr_submission.dart';
+import 'package:natco_app/features/omr_processing/domain/entity/omr_template.dart';
+import 'package:natco_app/features/omr_processing/domain/service/omr_processor.dart';
 import 'package:natco_app/features/omr_validation/data/service/omr_validation_data_source.dart';
 import 'package:natco_app/features/omr_validation/domain/entity/omr_validation_record.dart';
 import 'package:natco_app/features/omr_validation/domain/repository/omr_validation_repository.dart';
 import 'package:natco_app/features/omr_validation/domain/service/omr_validation_policy.dart';
+import 'package:natco_app/features/sync/domain/entity/sync_queue_entry.dart';
+import 'package:natco_app/features/sync/domain/entity/sync_status.dart';
+import 'package:natco_app/features/sync/domain/repository/sync_queue_repository.dart';
 
 final class OmrValidationRepositoryImpl implements OmrValidationRepository {
   OmrValidationRepositoryImpl({
@@ -28,17 +36,23 @@ final class OmrValidationRepositoryImpl implements OmrValidationRepository {
     required IdGenerator idGenerator,
     required Clock clock,
     required DeviceInfoService deviceInfo,
+    required SyncQueueRepository syncQueue,
+    required FileSystemService fileSystem,
   }) : _dataSource = dataSource,
        _auditSink = auditSink,
        _idGenerator = idGenerator,
        _clock = clock,
-       _deviceInfo = deviceInfo;
+       _deviceInfo = deviceInfo,
+       _syncQueue = syncQueue,
+       _fileSystem = fileSystem;
 
   final OmrValidationDataSource _dataSource;
   final AuditSink _auditSink;
   final IdGenerator _idGenerator;
   final Clock _clock;
   final DeviceInfoService _deviceInfo;
+  final SyncQueueRepository _syncQueue;
+  final FileSystemService _fileSystem;
 
   @override
   Future<Result<Page<OmrSubmission>>> listQueue({
@@ -137,9 +151,24 @@ final class OmrValidationRepositoryImpl implements OmrValidationRepository {
       return err(saveResult.failureOrNull!);
     }
 
+    await _syncQueue.enqueue(
+      SyncQueueEntry(
+        syncId: _idGenerator.newId(),
+        entityType: SyncEntityType.omrAnswer,
+        entityId: '$omrId#q$questionNumber',
+        operation: SyncOperation.update,
+        payloadRef: 'local/omr_answers/$omrId#q$questionNumber',
+        idempotencyKey: 'update_answer_${omrId}_q$questionNumber',
+        createdAt: now,
+        attemptCount: 0,
+        status: SyncStatus.pending,
+      ),
+    );
+
+    final String validationId = _idGenerator.newId();
     await _dataSource.appendValidationRecord(
       OmrValidationRecord(
-        validationId: _idGenerator.newId(),
+        validationId: validationId,
         omrId: omrId,
         questionNumber: questionNumber,
         machineAnswer: current.machineAnswer,
@@ -149,6 +178,20 @@ final class OmrValidationRepositoryImpl implements OmrValidationRepository {
         validatedAt: now,
         deviceId: _deviceInfo.deviceId,
         reason: reason,
+      ),
+    );
+
+    await _syncQueue.enqueue(
+      SyncQueueEntry(
+        syncId: _idGenerator.newId(),
+        entityType: SyncEntityType.omrValidation,
+        entityId: validationId,
+        operation: SyncOperation.create,
+        payloadRef: 'local/omr_validations/$validationId',
+        idempotencyKey: 'create_validation_$validationId',
+        createdAt: now,
+        attemptCount: 0,
+        status: SyncStatus.pending,
       ),
     );
 
@@ -269,6 +312,20 @@ final class OmrValidationRepositoryImpl implements OmrValidationRepository {
           appVersion: _deviceInfo.appVersion,
         ),
       );
+      
+      await _syncQueue.enqueue(
+        SyncQueueEntry(
+          syncId: _idGenerator.newId(),
+          entityType: SyncEntityType.omrSubmission,
+          entityId: omrId,
+          operation: SyncOperation.update,
+          payloadRef: 'local/omr_submissions/$omrId',
+          idempotencyKey: 'update_submission_$omrId',
+          createdAt: _clock.nowUtc(),
+          attemptCount: 0,
+          status: SyncStatus.pending,
+        ),
+      );
     }
     return result;
   }
@@ -287,12 +344,28 @@ final class OmrValidationRepositoryImpl implements OmrValidationRepository {
       // would be an unasked-for state change, not a recovery.
       return ok(submission);
     }
-    return _dataSource.saveSubmission(
+    final Result<OmrSubmission> result = await _dataSource.saveSubmission(
       submission.copyWith(
         processingStatus: OmrProcessingStatus.captured,
         updatedAt: _clock.nowUtc(),
       ),
     );
+    if (result.isSuccess) {
+      await _syncQueue.enqueue(
+        SyncQueueEntry(
+          syncId: _idGenerator.newId(),
+          entityType: SyncEntityType.omrSubmission,
+          entityId: omrId,
+          operation: SyncOperation.update,
+          payloadRef: 'local/omr_submissions/$omrId',
+          idempotencyKey: 'update_submission_$omrId',
+          createdAt: _clock.nowUtc(),
+          attemptCount: 0,
+          status: SyncStatus.pending,
+        ),
+      );
+    }
+    return result;
   }
 
   @override
@@ -346,6 +419,20 @@ final class OmrValidationRepositoryImpl implements OmrValidationRepository {
       return result;
     }
 
+    await _syncQueue.enqueue(
+      SyncQueueEntry(
+        syncId: _idGenerator.newId(),
+        entityType: SyncEntityType.omrSubmission,
+        entityId: omrId,
+        operation: SyncOperation.create,
+        payloadRef: 'local/omr_submissions/$omrId',
+        idempotencyKey: 'create_submission_$omrId',
+        createdAt: now,
+        attemptCount: 0,
+        status: SyncStatus.pending,
+      ),
+    );
+
     await _auditSink.record(
       AuditEvent(
         auditId: _idGenerator.newId(),
@@ -388,4 +475,140 @@ final class OmrValidationRepositoryImpl implements OmrValidationRepository {
 
     return result;
   }
+
+  @override
+  Future<Result<OmrSubmission>> processSubmission(
+    String omrId, {
+    required OmrTemplate template,
+    required int questionCount,
+  }) async {
+    final Result<OmrSubmission> current = await _dataSource.getSubmission(omrId);
+    if (current.isFailure) {
+      return err(current.failureOrNull!);
+    }
+    final OmrSubmission submission = current.valueOrNull!;
+
+    if (submission.processingStatus != OmrProcessingStatus.captured) {
+      return ok(submission);
+    }
+
+    final DateTime now = _clock.nowUtc();
+    final OmrSubmission processing = submission.copyWith(
+      processingStatus: OmrProcessingStatus.processing,
+      updatedAt: now,
+    );
+    final Result<OmrSubmission> processingUpdate = await _dataSource.saveSubmission(processing);
+    if (processingUpdate.isFailure) {
+      return err(processingUpdate.failureOrNull!);
+    }
+
+    Uint8List? bytes;
+    try {
+      bytes = await _fileSystem.readBytes(processing.originalImagePath);
+    } catch (_) {
+      return markEvidenceMissing(omrId);
+    }
+
+    final OmrProcessingResult result = await compute(
+      _runProcessor,
+      _OmrProcessorPayload(
+        imageBytes: bytes,
+        template: template,
+        questionCount: questionCount,
+      ),
+    );
+
+    if (!result.sheetAligned || !result.omrIdReadable) {
+      return resetToCaptured(omrId);
+    }
+
+    bool needsValidation = false;
+    for (final OmrQuestionReading q in result.questions) {
+      final OmrAnswer answer = OmrAnswer(
+        omrAnswerId: _idGenerator.newId(),
+        omrId: omrId,
+        questionNumber: q.questionNumber,
+        optionScores: q.optionScores,
+        machineAnswer: q.machineAnswer,
+        machineConfidence: q.machineConfidence,
+        machineStatus: q.machineStatus,
+        finalAnswer: q.machineAnswer,
+        finalAnswerSource: AnswerSource.machine,
+      );
+      if (answer.needsValidation) {
+        needsValidation = true;
+      }
+      final Result<OmrAnswer> answerSaved = await _dataSource.saveAnswer(answer);
+      if (answerSaved.isFailure) return err(answerSaved.failureOrNull!);
+      
+      await _syncQueue.enqueue(
+        SyncQueueEntry(
+          syncId: _idGenerator.newId(),
+          entityType: SyncEntityType.omrAnswer,
+          entityId: '$omrId#q${q.questionNumber}',
+          operation: SyncOperation.update,
+          payloadRef: 'local/omr_answers/$omrId#q${q.questionNumber}',
+          idempotencyKey: 'update_answer_${omrId}_q${q.questionNumber}',
+          createdAt: _clock.nowUtc(),
+          attemptCount: 0,
+          status: SyncStatus.pending,
+        ),
+      );
+    }
+
+    final OmrSubmission finished = processing.copyWith(
+      processingStatus: needsValidation 
+          ? OmrProcessingStatus.needsValidation 
+          : OmrProcessingStatus.processed,
+      validationStatus: needsValidation 
+          ? ValidationStatus.pending 
+          : ValidationStatus.notRequired,
+      updatedAt: _clock.nowUtc(),
+    );
+
+    final Result<OmrSubmission> finalSave = await _dataSource.saveSubmission(finished);
+    if (finalSave.isFailure) return err(finalSave.failureOrNull!);
+
+    await _syncQueue.enqueue(
+      SyncQueueEntry(
+        syncId: _idGenerator.newId(),
+        entityType: SyncEntityType.omrSubmission,
+        entityId: omrId,
+        operation: SyncOperation.update,
+        payloadRef: 'local/omr_submissions/$omrId',
+        idempotencyKey: 'update_submission_$omrId',
+        createdAt: _clock.nowUtc(),
+        attemptCount: 0,
+        status: SyncStatus.pending,
+      ),
+    );
+
+    return ok(finished);
+  }
+}
+
+final class _OmrProcessorPayload {
+  const _OmrProcessorPayload({
+    required this.imageBytes,
+    required this.template,
+    required this.questionCount,
+  });
+  final Uint8List imageBytes;
+  final OmrTemplate template;
+  final int questionCount;
+}
+
+OmrProcessingResult _runProcessor(_OmrProcessorPayload payload) {
+  final img.Image? decoded = img.decodeImage(payload.imageBytes);
+  if (decoded == null) {
+    return const OmrProcessingResult.alignmentFailed(
+      markersFound: 0,
+      reason: 'Could not decode image file.',
+    );
+  }
+  return OmrProcessor.process(
+    image: decoded,
+    template: payload.template,
+    questionCount: payload.questionCount,
+  );
 }

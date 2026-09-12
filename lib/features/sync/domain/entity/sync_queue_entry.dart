@@ -8,7 +8,8 @@ enum SyncEntityType {
   omrSubmission('omr_submission'),
   omrAnswer('omr_answer'),
   omrValidation('omr_validation'),
-  score('score');
+  score('score'),
+  assessmentSession('assessment_session');
 
   const SyncEntityType(this.wireName);
   final String wireName;
