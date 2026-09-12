@@ -5,11 +5,13 @@ the **git/release/process** layer; [00-project-status.md](00-project-status.md)
 is the living **feature-by-feature** status doc — read that one for
 what-is-built detail, this one for where-things-are and what-to-do-next.
 
-Last verified: **2026-09-12**, commit `1349ecd`, branch `feat/phase-9-sync`.
+Last verified: **2026-09-12**, commit `a8a05bd`, branch `feat/phase-9-sync`.
 
 **If you are picking this up cold, read §0 first** — it's the delta since the
 `56d2ee7` handoff below, including one real bug a second agent's otherwise-good
-work introduced and how it was caught.
+work introduced and how it was caught. Commit `a8a05bd` (after `1349ecd`)
+closed known-gap items 3-4 below (calibration screen, `tool/omr_eval.dart`
+harness) — `flutter analyze` clean, `flutter test` 601/601 passing.
 
 ---
 
@@ -99,6 +101,8 @@ the fix, not assumed from the diff alone.
 | `56d2ee7` | **Phase 6: real OMR engine** — `OmrTemplate`, `OmrProcessor` (marker detection, homography, rotation resolution, bubble sampling, classification, confidence), 9 tests against synthetic sheets |
 | `fdfc81f` | Add HANDOFF.md |
 | `1349ecd` | Wire phase 6 engine to captures (`processSubmission`) and enqueue sync-queue entries on every write path (closes known gaps #1-#2 below); fixed a demo/test-mode regression this exposed in `syncQueueDataSourceProvider` (see §0) |
+| `553bbb9` | Docs only — HANDOFF.md §0 and project-status.md updated for `1349ecd` |
+| `a8a05bd` | Wire calibration screen to real thresholds + single-sheet test flow, and build `tool/omr_eval.dart` (closes known gaps #3-#4 below) |
 
 Every commit above is pushed to `origin/feat/phase-9-sync`. Nothing is only
 local. Commit messages themselves carry the detailed "why", not just "what" —
@@ -218,24 +222,42 @@ These are the concrete, actionable items. Everything here is **device-independen
    call `SyncQueueRepository.enqueue` on every write path. Fixing this
    surfaced a real demo/test-mode regression, described in §0 — worth reading
    before touching `service_locator.dart` again.
-3. **Calibration screen** (`/settings/calibration`) is still a static mockup —
-   sliders don't read/write `ScannerThresholds`, the "upload test OMR" and
-   "run the harness" buttons are no-ops. docs/10-omr-calibration-testing.md
-   §50 describes a single-sheet ad-hoc flow (upload one image + type in
-   ground truth + see a per-question comparison) that's buildable now,
-   independent of having a real dataset — it would exercise `OmrProcessor`
-   directly rather than needing `tool/omr_eval.dart`. **Do not** let this
-   screen show a "measured accuracy" figure from anything less than a real,
-   labelled batch — Critical Rule 14 is absolute here.
-4. **`tool/omr_eval.dart` harness** (docs/10 §"Harness") does not exist. The
-   harness's own logic (read a manifest + images, run `OmrProcessor` per
-   image, diff against ground truth, write `summary.json`/`per_sheet.csv`/
-   `confusion.csv`) is pure Dart and testable against a tiny synthetic
-   "dataset" this repo could generate itself — proving the harness's own
-   aggregation math is right. **This still produces no real accuracy number**
-   — there is no `omr_dataset/` and no real scanned sheet anywhere in this
-   environment. Building the harness ≠ measuring accuracy; keep those two
-   claims separate in whatever gets written about it.
+3. ~~Calibration screen is a static mockup~~ — **done, commit
+   `a8a05bd`.** Sliders now build a real `ScannerThresholds` draft; "Upload
+   test OMR" picks a real image (gallery), a ground-truth text field takes
+   one label per question (`A`/`B`/`C`/`D`/`BLANK`/`MULTIPLE`, comma- or
+   newline-separated), and "Run" actually decodes the image and calls
+   `OmrProcessor.process` on a background isolate with the slider-derived
+   thresholds, then shows a real per-question comparison (match/mismatch,
+   machine status, confidence). The screen moved from `_previewRoutes` to
+   `_realRoutes` in `preview_labelling_test.dart` accordingly. **Still not
+   built, deliberately**: there is no `app_config`/Firestore
+   threshold-persistence layer anywhere in this app yet, so "Save
+   thresholds" (docs/10 §50's last step) doesn't exist — the sliders' values
+   are used for the single-sheet test only, not persisted. The "measured
+   accuracy across a dataset" section still shows an honest empty state,
+   because a single sheet is not a golden dataset (Critical Rule 14).
+4. ~~`tool/omr_eval.dart` harness does not exist~~ — **done, commit
+   `a8a05bd`.** Reads `<dataset>/manifest.json` (a JSON array of `{id,
+   image, omrId, answers}`), runs the real `OmrProcessor` over every listed
+   image, and writes `summary.json`/`per_sheet.csv`/`per_question.csv`/
+   `confusion.csv` to `<dataset>/reports/<timestamp>/`. Its aggregation math
+   (`summarize()` in `tool/omr_eval.dart`) is proven by
+   `test/tool/omr_eval_test.dart` against a 3-sheet synthetic dataset drawn
+   in-memory (reusing `test/support/synthetic_omr_sheet.dart`, extracted
+   from `omr_processor_test.dart` so both share one drawing), with ground
+   truth chosen to deliberately disagree with what was actually drawn on two
+   of the three sheets — proving the harness *notices* disagreement, not
+   just that it runs. The CLI path itself (arg parsing, manifest/image file
+   I/O, report writing) was also smoke-tested by hand against a real
+   on-disk tiny dataset (`dart run tool/omr_eval.dart --dataset <dir>`),
+   not only through the pure-function unit test. **This still produces no
+   real accuracy number for the scanner** — there is no `omr_dataset/` and
+   no real scanned sheet anywhere in this environment; running the harness
+   here finds no manifest and reports nothing. Not built: per-stage timings
+   (only total per-sheet wall-clock is measured — `OmrProcessor` exposes no
+   per-stage instrumentation) and rendered failure overlays (docs/10 §2) —
+   both noted honestly in the harness's own doc comment rather than faked.
 5. **Phase 5's camera path has never run on a real device** *(blocked on
    hardware, not code)*. `image_picker`'s camera source, the `CAMERA`
    manifest permission, and `permission_handler`'s request flow are wired but

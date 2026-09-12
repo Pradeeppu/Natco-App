@@ -406,11 +406,13 @@ resets to `CAPTURED` on alignment/marker failure. See
 for the full account, including a real bug this wiring surfaced elsewhere
 (demo/test mode's sync-queue provider) and how it was fixed.
 
-**What is still not built**: there is no calibration harness
-(`tool/omr_eval.dart` from docs/10-omr-calibration-testing.md) and no
-`omr_dataset/` — building either against zero real scanned sheets would
-produce a harness with nothing correct to measure, which is exactly the shape
-of thing Critical Rule 14 forbids pretending to have. The template geometry
+**Update**: the calibration harness (`tool/omr_eval.dart`) now exists — see
+§3 "What is left" below and [HANDOFF.md §0](HANDOFF.md). **What is still not
+built**: there is no `omr_dataset/` and no real scanned sheet anywhere in
+this environment, so running the harness here finds no manifest and reports
+nothing — building the harness is not the same as measuring accuracy, which
+is exactly the distinction Critical Rule 14 exists to enforce. The template
+geometry
 (`OmrTemplate.natcoV1()`) is a Dart constant, not a parsed
 `assets/omr_templates/natco_v1.json` file — a deliberate, easily-reversed
 scoping choice, not a missing feature; nothing in this environment could
@@ -421,14 +423,19 @@ exercise loading it from an asset bundle any differently.
 | Screen | Route | Phase |
 |---|---|---|
 | Scan result with confidence breakdown | `/omr/review/:omrId` | 6 |
-| Scanner calibration and accuracy harness | `/settings/calibration` | 6 |
 
-Each carries an unmissable "every figure below is made up" band
+Carries an unmissable "every figure below is made up" band
 (`core/widgets/preview_kit.dart`), enforced by
 `test/widget/preview_labelling_test.dart` — that test fails if a preview
-screen loses its band, or if a real screen wrongly carries one. Calibration
-is a deliberate exception: it shows an empty state, not an invented accuracy
-figure, because none has been measured (Critical Rule 14).
+screen loses its band, or if a real screen wrongly carries one.
+
+**Scanner calibration** (`/settings/calibration`) moved out of this table:
+its sliders build a real `ScannerThresholds` draft and its single-sheet test
+flow actually decodes a picked image and runs `OmrProcessor` against it, so
+it now carries no band and lives in `_realRoutes` in
+`preview_labelling_test.dart` instead. It still shows an honest empty state
+for aggregate accuracy across a dataset, because none has been measured
+(Critical Rule 14) — a single sheet is real data, not a golden dataset.
 
 ---
 
@@ -520,8 +527,14 @@ Honest and current:
 4. ~~Phase 6's engine has no caller~~ — **fixed, commit `1349ecd`.**
    `OmrValidationRepository.processSubmission` now invokes `OmrProcessor.process`
    against a real `CAPTURED` submission on a background isolate. Still true:
-   no calibration harness, no real dataset, no measured accuracy (Critical
-   Rule 14) — see the phase 6 section above.
+   no real dataset, no measured accuracy (Critical Rule 14) — see the phase
+   6 section above.
+5. ~~Calibration screen is a static mockup; `tool/omr_eval.dart` does not
+   exist~~ — **fixed.** The calibration screen's sliders and single-sheet
+   test flow are real, and `tool/omr_eval.dart` is built and proven against
+   a synthetic dataset. See [HANDOFF.md §5](HANDOFF.md) items 3-4 for the
+   full account of what changed and what is still deliberately not built
+   (threshold persistence, per-stage timings, failure overlays).
 
 ---
 
