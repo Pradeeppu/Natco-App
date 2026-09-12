@@ -354,7 +354,7 @@ widget test that pumps `/omr/capture?sessionId=...` exercises the real form
 the demo session — that proves the screen renders and does not crash under
 test, not that the camera hardware path works.
 
-### Phase 6 — OMR engine ⚠️ built and tested against synthetic sheets; not wired to a capture; no measured accuracy
+### Phase 6 — OMR engine ⚠️ built and tested against synthetic sheets; now wired to a capture; still no measured accuracy
 
 The pipeline docs/07-omr-pipeline.md calls for (steps 3-10: marker detection,
 perspective correction, rotation resolution, bubble sampling, answer
@@ -395,17 +395,22 @@ Rule 14). What is proven, by 9 tests:
   7x10 digit grid; anything short of one high-confidence digit per column
   makes the whole id `UNREADABLE` rather than guessed, per docs/07 Step 7.
 
-**What this is not**: it is not wired to a real capture. No repository
-method calls `OmrProcessor.process` yet — `OmrValidationRepository` has no
-`processSubmission`-shaped method, so a captured sheet still sits at
-`CAPTURED` with nothing moving it to `PROCESSED`/`NEEDS_VALIDATION`. That
-also means Critical Rule 13's isolate requirement has nothing to wrap yet —
-there is no caller on the UI thread this could block. And there is no
-calibration harness (`tool/omr_eval.dart` from
-docs/10-omr-calibration-testing.md) and no `omr_dataset/` — building either
-against zero real scanned sheets would produce a harness with nothing
-correct to measure, which is exactly the shape of thing Critical Rule 14
-forbids pretending to have. The template geometry
+**Update (commit `1349ecd`)**: now wired to a real capture.
+`OmrValidationRepository.processSubmission` reads a `CAPTURED` submission's
+image bytes off disk, decodes them, runs `OmrProcessor.process` on a
+background isolate via `compute()` (Critical Rule 13 — the isolate
+requirement now has a real caller to wrap), writes the resulting `OmrAnswer`
+rows, and advances `processingStatus` to `PROCESSED`/`NEEDS_VALIDATION`, or
+resets to `CAPTURED` on alignment/marker failure. See
+[HANDOFF.md §0](HANDOFF.md#0-what-changed-since-the-last-handoff-commit-1349ecd)
+for the full account, including a real bug this wiring surfaced elsewhere
+(demo/test mode's sync-queue provider) and how it was fixed.
+
+**What is still not built**: there is no calibration harness
+(`tool/omr_eval.dart` from docs/10-omr-calibration-testing.md) and no
+`omr_dataset/` — building either against zero real scanned sheets would
+produce a harness with nothing correct to measure, which is exactly the shape
+of thing Critical Rule 14 forbids pretending to have. The template geometry
 (`OmrTemplate.natcoV1()`) is a Dart constant, not a parsed
 `assets/omr_templates/natco_v1.json` file — a deliberate, easily-reversed
 scoping choice, not a missing feature; nothing in this environment could
@@ -492,23 +497,18 @@ Enforced in code and in the security rules, not merely written down.
 
 Honest and current:
 
-1. **No repository in this app enqueues a sync-queue entry yet — checked
-   directly this pass, not assumed.** `SyncQueueRepository.enqueue` has
-   exactly one caller anywhere in `lib/`: itself. `SessionRepositoryImpl`,
-   `OmrValidationRepositoryImpl.createSubmission` and every other write path
-   persist locally but none of them write the matching sync-queue record —
-   so a captured session or sheet sits ready to sync but nothing has told
-   the queue about it. This predates this session's work (it was already
-   true of session/attendance writes before `createSubmission` existed) and
-   is a bigger, pre-existing gap than "phase 5 doesn't exist yet" — wiring
-   every write path to also enqueue is a cross-cutting change across several
-   repositories, out of scope for this pass to do safely without the budget
-   to test each one. The reconciler's 4th step (re-enqueuing an orphaned
-   entity with no queue record) stays undoable for the same reason: nothing
-   yet produces the paired write this step would need to detect divergence
-   in. The other three reconciler steps (reset stuck `UPLOADING`, reset a
-   crashed `PROCESSING` submission, mark evidence missing) are built and
-   tested and do not depend on this gap.
+1. ~~No repository in this app enqueues a sync-queue entry~~ — **fixed,
+   commit `1349ecd`.** `SessionRepositoryImpl` and
+   `OmrValidationRepositoryImpl` now call `SyncQueueRepository.enqueue` on
+   every write path (session create/status-change/attendance/omr attach;
+   submission create/update; answer validation; validation record). Wiring
+   this exposed a real demo/test-mode regression in
+   `syncQueueDataSourceProvider` — see
+   [HANDOFF.md §0](HANDOFF.md#0-what-changed-since-the-last-handoff-commit-1349ecd)
+   for the full account. The reconciler's 4th step (re-enqueuing an orphaned
+   entity with no queue record) is unaffected by this fix and stays undoable:
+   nothing in this app writes an entity without also writing its queue entry
+   in the same step, so there is still no orphan for that step to detect.
 2. **Fixed since the last pass**: `SyncQueueEntry.operation`/`entityType` are
    now `SyncOperation`/`SyncEntityType` enums, not bare strings; and
    `SyncConflictPolicy` now checks
@@ -517,12 +517,11 @@ Honest and current:
 3. **Phase 5's camera path has never run on a real device.** The code is
    complete and the demo flow is exercised by widget tests, but nobody has
    installed the app on a phone and taken an actual photo through it yet.
-4. **Phase 6's engine has no caller.** `OmrProcessor.process` is built and
-   tested against synthetic sheets, but no repository method invokes it
-   against a real `CAPTURED` submission — so today, a sheet captured through
-   the phase 5 screen sits at `CAPTURED` and nothing moves it forward. That
-   also means Critical Rule 13's isolate requirement has nothing to wrap
-   yet.
+4. ~~Phase 6's engine has no caller~~ — **fixed, commit `1349ecd`.**
+   `OmrValidationRepository.processSubmission` now invokes `OmrProcessor.process`
+   against a real `CAPTURED` submission on a background isolate. Still true:
+   no calibration harness, no real dataset, no measured accuracy (Critical
+   Rule 14) — see the phase 6 section above.
 
 ---
 

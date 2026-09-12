@@ -5,7 +5,73 @@ the **git/release/process** layer; [00-project-status.md](00-project-status.md)
 is the living **feature-by-feature** status doc — read that one for
 what-is-built detail, this one for where-things-are and what-to-do-next.
 
-Last verified: **2026-09-11**, commit `56d2ee7`, branch `feat/phase-9-sync`.
+Last verified: **2026-09-12**, commit `1349ecd`, branch `feat/phase-9-sync`.
+
+**If you are picking this up cold, read §0 first** — it's the delta since the
+`56d2ee7` handoff below, including one real bug a second agent's otherwise-good
+work introduced and how it was caught.
+
+---
+
+## 0. What changed since the last handoff (commit `1349ecd`)
+
+A second agent picked up known gaps #1 and #2 from §5 below (phase 6's engine
+had no caller; no repository enqueued a sync-queue entry) and wired both,
+closely following the plan this document laid out:
+
+- `OmrValidationRepository.processSubmission` now reads a `CAPTURED`
+  submission's image bytes (`FileSystemService.readBytes`, added), decodes
+  them, and runs `OmrProcessor.process` on a background isolate via
+  `compute()` (Critical Rule 13), then writes the resulting `OmrAnswer` rows
+  and advances `processingStatus` to `PROCESSED`/`NEEDS_VALIDATION` — or
+  resets to `CAPTURED` on alignment failure, reusing the reconciler's existing
+  precedent rather than inventing a new status, exactly as suggested.
+- `SessionRepositoryImpl` and `OmrValidationRepositoryImpl` now call
+  `SyncQueueRepository.enqueue` on every write that previously persisted
+  locally and stopped there (session create/status-change/attendance/omr
+  attach; submission create/update; answer validation; validation record).
+
+**This work was sound, but shipped one real, non-obvious bug**, found by
+actually running the suite rather than trusting the diff: `flutter analyze`
+was clean, but `flutter test` had exactly one failure —
+`preview_labelling_test.dart`'s `/results?assessmentId=as_demo_midline_g5`
+case — and it failed as a `pumpAndSettle` **timeout**, not a clean assertion
+failure. That shape of failure is a symptom worth recognizing on sight: it
+almost always means something is awaiting a resource that was never actually
+initialized for the environment the test runs under, not a logic bug in the
+test's own assertion.
+
+Root cause: `syncQueueDataSourceProvider` in `service_locator.dart` built a
+`HiveSyncQueueDataSource` unconditionally. Every *other* data-source provider
+in this file branches on `config.environment.usesFirebase` — demo mode and
+every widget test (which run under `AppEnvironment.demo`) get an in-memory
+implementation, since Hive boxes are opened during real app init and never
+during a widget test. `syncQueueDataSourceProvider` was the one provider that
+didn't follow this convention — harmless for phases 1-8 because nothing ever
+called `enqueue`, but the moment this pass wired real callers, demo mode and
+every widget test started hitting a Hive box that was never opened, which
+hangs rather than throwing a catchable error.
+
+Fixed by adding `InMemorySyncQueueDataSource` (mirrors
+`InMemoryResultDataSource`'s shape) and giving `syncQueueDataSourceProvider`
+the same `usesFirebase` branch every sibling provider already has. Confirmed
+by reverting to a stash of the pre-fix diff and re-running the single failing
+test against the untouched baseline first — it passed clean there, proving
+the failure was a real regression from the new diff, not a pre-existing flake
+— then re-running it and the full suite against the fix.
+
+**The lesson for whoever touches `service_locator.dart` next**: if you add a
+new provider that reads from a Hive box, a real file, or anything else that
+only exists once real app init has run, it needs the `if
+(!config.environment.usesFirebase) { return InMemory... }` branch *before*
+anything calls it for real — not after, when the failure mode is a hang deep
+inside an unrelated screen's widget test rather than an obvious constructor
+error.
+
+`flutter analyze`: clean. `flutter test`: 585/585 passing, confirmed after
+the fix, not assumed from the diff alone.
+
+---
 
 ---
 
@@ -31,6 +97,8 @@ Last verified: **2026-09-11**, commit `56d2ee7`, branch `feat/phase-9-sync`.
 | `7c02275` | `OmrValidationRepository.createSubmission`; sync-conflict authorization moved from hardcoded roles to `Permission.resolveSyncConflict`; `ScoringEngine` blank/multiple-mark bug fix; `SyncQueueEntry` fields turned into enums |
 | `00a2ae5` | Phase 5 complete: real `OmrCaptureScreen` (camera/gallery via `image_picker`, student picker, quality gate, override flow), wired to `createSubmission` |
 | `56d2ee7` | **Phase 6: real OMR engine** — `OmrTemplate`, `OmrProcessor` (marker detection, homography, rotation resolution, bubble sampling, classification, confidence), 9 tests against synthetic sheets |
+| `fdfc81f` | Add HANDOFF.md |
+| `1349ecd` | Wire phase 6 engine to captures (`processSubmission`) and enqueue sync-queue entries on every write path (closes known gaps #1-#2 below); fixed a demo/test-mode regression this exposed in `syncQueueDataSourceProvider` (see §0) |
 
 Every commit above is pushed to `origin/feat/phase-9-sync`. Nothing is only
 local. Commit messages themselves carry the detailed "why", not just "what" —
@@ -122,10 +190,10 @@ Full detail lives in [00-project-status.md](00-project-status.md) §3-4. Summary
 | 3 Assessments | ✅ built, tested |
 | 4 Offline sessions | ✅ built, tested |
 | 5 OMR capture | ✅ code complete (camera/gallery capture, quality gate, durable write, `createSubmission`) — **never run on a real phone** |
-| 6 OMR engine | ⚠️ built and tested against **synthetic** sheets only (marker detection, homography, rotation resolution, sampling, classification, confidence) — **not wired to a real capture** (no repository method calls it yet, so a captured sheet still just sits at `CAPTURED`); **no measured accuracy exists or is claimed anywhere** |
+| 6 OMR engine | ⚠️ built and tested against **synthetic** sheets only (marker detection, homography, rotation resolution, sampling, classification, confidence) — **now wired to a real capture** (`OmrValidationRepository.processSubmission`, commit `1349ecd`) but still **no measured accuracy exists or is claimed anywhere**, and still no calibration harness or real dataset |
 | 7 OMR Validation | ✅ built, tested |
 | 8 Scoring | ✅ built, tested |
-| 9 Sync | ✅ built, tested — with one caveat, see §5 below |
+| 9 Sync | ✅ built, tested — every repository write path now enqueues a sync-queue entry (commit `1349ecd`); one caveat remains, see §5 below |
 | 10 Analytics | ✅ built, tested |
 | 11 Reports | ✅ built, tested |
 | 12 Hardening | ⚠️ security rules re-checked (deny-by-default holds, no `if true` grant anywhere) — **performance budgets and device soak testing blocked on a physical device** |
@@ -138,42 +206,18 @@ Full detail lives in [00-project-status.md](00-project-status.md) §3-4. Summary
 
 These are the concrete, actionable items. Everything here is **device-independent** (buildable and testable without a phone) except where marked.
 
-1. **Phase 6's engine has no caller — highest priority.** `OmrProcessor.process`
-   (`lib/features/omr_processing/domain/service/omr_processor.dart`) is real
-   and tested, but nothing invokes it against an actual `CAPTURED` submission.
-   Needed: a repository method (likely on `OmrValidationRepositoryImpl`,
-   following the precedent of its existing narrow phase-6 exceptions like
-   `listSubmissionsForAssessment`) that: reads the submission, reads its image
-   bytes back off disk (`FileSystemService` currently only has `writeBytes` —
-   **a `readBytes` method needs adding first**), decodes via
-   `package:image`, runs `OmrProcessor.process` **on a background isolate**
-   (Critical Rule 13 — use `compute()` from `package:flutter/foundation.dart`;
-   `OmrProcessingResult`/`OmrTemplate`/`ScannerThresholds` are all plain
-   Dart — primitives, enums, `Map`/`List` of primitives, `dart:math`'s
-   `Point<double>` — so they should cross the isolate boundary without extra
-   serialization, but confirm this holds once written), writes the resulting
-   `OmrAnswer` rows via the existing `saveAnswer`, and moves
-   `processingStatus` `CAPTURED → PROCESSING → PROCESSED` (and, if any answer
-   isn't `isAutoAcceptable`, on to `NEEDS_VALIDATION` with `validationStatus`
-   set to `pending`) — matching `OmrProcessingStatus.allowedNext` exactly,
-   two sequential writes rather than skipping a state. On marker/alignment
-   failure, the existing `resetToCaptured`-style transition (already used by
-   the sync reconciler) is the precedent to reuse rather than inventing a new
-   status — `OmrProcessingStatus` has no "alignment failed" value, and adding
-   one means also touching `firebase/firestore.rules`' fixed status-string
-   set, which is a bigger, riskier change to make without real data to test
-   against.
-2. **No repository anywhere enqueues a sync-queue entry.** Checked directly,
-   not assumed: `SyncQueueRepository.enqueue` has exactly one caller in the
-   whole of `lib/` — itself. `SessionRepositoryImpl`, `OmrValidationRepositoryImpl`
-   and every other write path persist locally but never write the matching
-   sync-queue record, so nothing captured or created on a device would
-   actually reach the sync engine's drain loop. This predates this session
-   (already true of session/attendance writes before `createSubmission`
-   existed) and is bigger than it sounds — it's a cross-cutting change
-   touching several repositories' write paths, each needing its own test
-   update. Do this **after** item 1, since item 1 changes what "a submission
-   write" looks like.
+1. ~~Phase 6's engine has no caller~~ — **done, commit `1349ecd`.**
+   `OmrValidationRepository.processSubmission` reads the submission, reads its
+   image bytes off disk (`FileSystemService.readBytes`, added), decodes via
+   `package:image`, runs `OmrProcessor.process` on a background isolate via
+   `compute()`, writes the resulting `OmrAnswer` rows, and moves
+   `processingStatus` accordingly (or resets to `CAPTURED` on alignment
+   failure, reusing the reconciler's precedent). See §0 above.
+2. ~~No repository anywhere enqueues a sync-queue entry~~ — **done, commit
+   `1349ecd`.** `SessionRepositoryImpl` and `OmrValidationRepositoryImpl` now
+   call `SyncQueueRepository.enqueue` on every write path. Fixing this
+   surfaced a real demo/test-mode regression, described in §0 — worth reading
+   before touching `service_locator.dart` again.
 3. **Calibration screen** (`/settings/calibration`) is still a static mockup —
    sliders don't read/write `ScannerThresholds`, the "upload test OMR" and
    "run the harness" buttons are no-ops. docs/10-omr-calibration-testing.md
