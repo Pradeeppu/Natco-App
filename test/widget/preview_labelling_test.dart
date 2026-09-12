@@ -21,9 +21,7 @@ import 'role_navigation_test.dart' show goTo;
 import 'test_harness.dart';
 
 /// Routes still showing sample data, with the phase that makes them real.
-const Map<String, String> _previewRoutes = <String, String>{
-  RoutePaths.calibration: 'Phase 6',
-};
+const Map<String, String> _previewRoutes = <String, String>{};
 
 /// Routes backed by real repositories. These must NOT be banded.
 const List<String> _realRoutes = <String>[
@@ -38,6 +36,7 @@ const List<String> _realRoutes = <String>[
   RoutePaths.omrCapture,
   '/omr/capture?sessionId=ses_demo_1',
   RoutePaths.settings,
+  RoutePaths.calibration,
   RoutePaths.omrValidationQueue,
   '/omr/validation/0001827',
   RoutePaths.results,

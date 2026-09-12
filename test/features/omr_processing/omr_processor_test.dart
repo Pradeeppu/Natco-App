@@ -18,102 +18,7 @@ import 'package:natco_app/features/omr_processing/domain/entity/omr_answer.dart'
 import 'package:natco_app/features/omr_processing/domain/entity/omr_template.dart';
 import 'package:natco_app/features/omr_processing/domain/service/omr_processor.dart';
 
-const int _sheetWidth = 500;
-const int _sheetHeight = 707; // A4 ratio, matching OmrTemplate.natcoV1
-const int _margin = 40;
-
-/// Builds a synthetic NATCO v1 photo: white background, four corner
-/// markers (bottom-left notched unless [notchBottomLeft] is false, to build
-/// the "orientation unresolved" case), the `omrId` bubble grid, and the given
-/// [questionAnswers] fully filled (an empty list = blank, two letters =
-/// multiple mark).
-img.Image _buildSheet({
-  required OmrTemplate template,
-  required String omrId,
-  required Map<int, List<String>> questionAnswers,
-}) {
-  final img.Image image = img.Image(
-    width: _sheetWidth + _margin * 2,
-    height: _sheetHeight + _margin * 2,
-  );
-  for (int y = 0; y < image.height; y++) {
-    for (int x = 0; x < image.width; x++) {
-      image.setPixelRgb(x, y, 255, 255, 255);
-    }
-  }
-
-  Point<double> toPixel(Point<double> normalised) => Point<double>(
-    _margin + normalised.x * _sheetWidth,
-    _margin + normalised.y * _sheetHeight,
-  );
-
-  final int markerHalf = (template.markerSizeFraction * _sheetWidth / 2).round();
-  void drawMarker(Point<double> normalisedCenter, {bool notch = false}) {
-    final Point<double> c = toPixel(normalisedCenter);
-    final int cx = c.x.round(), cy = c.y.round();
-    for (int y = cy - markerHalf; y <= cy + markerHalf; y++) {
-      for (int x = cx - markerHalf; x <= cx + markerHalf; x++) {
-        if (x >= 0 && x < image.width && y >= 0 && y < image.height) {
-          image.setPixelRgb(x, y, 0, 0, 0);
-        }
-      }
-    }
-    if (notch) {
-      // A bite out of the corner facing the sheet's centre — same asymmetry
-      // docs/07 describes, cutting fill ratio without shrinking the bbox.
-      final int notchHalf = (markerHalf * 0.45).round();
-      final int nx = cx + (markerHalf * 0.55).round();
-      final int ny = cy - (markerHalf * 0.55).round();
-      for (int y = ny - notchHalf; y <= ny + notchHalf; y++) {
-        for (int x = nx - notchHalf; x <= nx + notchHalf; x++) {
-          if (x >= 0 && x < image.width && y >= 0 && y < image.height) {
-            image.setPixelRgb(x, y, 255, 255, 255);
-          }
-        }
-      }
-    }
-  }
-
-  drawMarker(template.markerTopLeft);
-  drawMarker(template.markerTopRight);
-  drawMarker(template.markerBottomRight);
-  drawMarker(template.markerBottomLeft, notch: true);
-
-  final int bubbleRadius = (template.bubbleDiameterFraction * _sheetWidth / 2).round();
-  void fillDisc(Point<double> normalisedCenter, {double halfOnly = 0}) {
-    final Point<double> c = toPixel(normalisedCenter);
-    final int r2 = bubbleRadius * bubbleRadius;
-    for (int dy = -bubbleRadius; dy <= bubbleRadius; dy++) {
-      for (int dx = -bubbleRadius; dx <= bubbleRadius; dx++) {
-        if (dx * dx + dy * dy > r2) {
-          continue;
-        }
-        if (halfOnly > 0 && dx > 0) {
-          continue; // left-half fill, for the partial-mark case
-        }
-        final int x = (c.x + dx).round();
-        final int y = (c.y + dy).round();
-        if (x >= 0 && x < image.width && y >= 0 && y < image.height) {
-          image.setPixelRgb(x, y, 0, 0, 0);
-        }
-      }
-    }
-  }
-
-  for (int i = 0; i < omrId.length && i < template.idColumns; i++) {
-    final int digit = int.parse(omrId[i]);
-    fillDisc(template.idBubbleCenter(i, digit));
-  }
-
-  const List<String> options = <String>['A', 'B', 'C', 'D'];
-  for (final MapEntry<int, List<String>> entry in questionAnswers.entries) {
-    for (final String option in entry.value) {
-      fillDisc(template.answerBubbleCenter(entry.key, options.indexOf(option)));
-    }
-  }
-
-  return image;
-}
+import '../../support/synthetic_omr_sheet.dart';
 
 void main() {
   final OmrTemplate template = OmrTemplate.natcoV1();
@@ -122,7 +27,7 @@ void main() {
     late img.Image sheet;
 
     setUp(() {
-      sheet = _buildSheet(
+      sheet = buildSyntheticOmrSheet(
         template: template,
         omrId: '1234567',
         questionAnswers: <int, List<String>>{
@@ -197,7 +102,7 @@ void main() {
     'a sheet photographed upside down is detected and corrected, not '
     'silently inverted',
     () {
-      final img.Image upright = _buildSheet(
+      final img.Image upright = buildSyntheticOmrSheet(
         template: template,
         omrId: '7654321',
         questionAnswers: <int, List<String>>{
@@ -226,7 +131,7 @@ void main() {
   );
 
   test('a sheet rotated 90 degrees is still read correctly', () {
-    final img.Image upright = _buildSheet(
+    final img.Image upright = buildSyntheticOmrSheet(
       template: template,
       omrId: '1112223',
       questionAnswers: <int, List<String>>{
@@ -247,7 +152,7 @@ void main() {
   });
 
   test('fewer than four visible markers fails closed rather than guessing', () {
-    final img.Image sheet = _buildSheet(
+    final img.Image sheet = buildSyntheticOmrSheet(
       template: template,
       omrId: '1234567',
       // No answer bubbles: the answer grid's top-left corner falls inside
@@ -283,7 +188,7 @@ void main() {
     'a partial, ambiguous mark is preserved as machine evidence but never '
     'silently promoted to a confident answer',
     () {
-      final img.Image sheet = _buildSheet(
+      final img.Image sheet = buildSyntheticOmrSheet(
         template: template,
         omrId: '1234567',
         questionAnswers: <int, List<String>>{},
@@ -295,10 +200,16 @@ void main() {
       // in the documented decision tree.
       void partialFill(int optionIndex, double fraction) {
         final Point<double> center = Point<double>(
-          _margin + template.answerBubbleCenter(1, optionIndex).x * _sheetWidth,
-          _margin + template.answerBubbleCenter(1, optionIndex).y * _sheetHeight,
+          syntheticSheetMargin +
+              template.answerBubbleCenter(1, optionIndex).x *
+                  syntheticSheetWidth,
+          syntheticSheetMargin +
+              template.answerBubbleCenter(1, optionIndex).y *
+                  syntheticSheetHeight,
         );
-        final int radius = (template.bubbleDiameterFraction * _sheetWidth / 2).round();
+        final int radius =
+            (template.bubbleDiameterFraction * syntheticSheetWidth / 2)
+                .round();
         final double cutoffDx = -radius + 2 * radius * fraction;
         for (int dy = -radius; dy <= radius; dy++) {
           for (int dx = -radius; dx <= cutoffDx; dx++) {
