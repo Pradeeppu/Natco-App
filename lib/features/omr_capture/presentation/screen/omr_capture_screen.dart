@@ -33,9 +33,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:natco_app/app/config/service_locator.dart';
+import 'package:natco_app/core/constants/route_paths.dart';
 import 'package:natco_app/core/errors/failure.dart';
 import 'package:natco_app/core/utils/result.dart';
 import 'package:natco_app/core/widgets/app_state_views.dart';
+import 'package:natco_app/core/widgets/status_chip.dart';
 import 'package:natco_app/features/assessment_sessions/domain/entity/assessment_session.dart';
 import 'package:natco_app/features/assessment_sessions/presentation/controller/session_controllers.dart';
 import 'package:natco_app/features/assessments/domain/entity/assessment.dart';
@@ -62,14 +64,166 @@ final class OmrCaptureScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text('Capture OMR')),
       body: SafeArea(
         child: sessionId == null
-            ? const EmptyView(
-                title: 'No session selected',
-                message:
-                    'Open capture from an in-progress session so the sheet '
-                    'can be linked to the right student and roster.',
-                icon: Icons.link_off_outlined,
-              )
+            ? const _SessionPicker()
             : _SessionLoader(sessionId: sessionId),
+      ),
+    );
+  }
+}
+
+final class _SessionPicker extends ConsumerWidget {
+  const _SessionPicker();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AsyncValue<List<AssessmentSession>> asyncSessions = ref.watch(
+      openSessionsProvider,
+    );
+
+    return asyncSessions.when(
+      loading: () => const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text('Loading active sessions...'),
+        ),
+      ),
+      error: (Object error, StackTrace _) => FailureView(
+        failure: asFailure(error),
+        onRetry: () => ref.invalidate(openSessionsProvider),
+      ),
+      data: (List<AssessmentSession> sessions) {
+        if (sessions.isEmpty) {
+          return EmptyView(
+            title: 'No active assessment sessions',
+            message:
+                'Sheets must be linked to an active session so the right '
+                'student roster and answer key are scored. Start a session '
+                'from the Assessments tab.',
+            icon: Icons.link_off_outlined,
+            action: FilledButton.icon(
+              onPressed: () => context.go(RoutePaths.assessments),
+              icon: const Icon(Icons.assignment_outlined),
+              label: const Text('View assessments'),
+            ),
+          );
+        }
+
+        final ThemeData theme = Theme.of(context);
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: <Widget>[
+            Text(
+              'Select an active session',
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Choose an in-progress session to begin capturing and validating student sheets.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 16),
+            for (final AssessmentSession session in sessions)
+              _SessionCard(session: session),
+          ],
+        );
+      },
+    );
+  }
+}
+
+final class _SessionCard extends StatelessWidget {
+  const _SessionCard({required this.session});
+
+  final AssessmentSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    'Grade ${session.grade} • Section ${session.section}',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                StatusChip(
+                  label: session.status.displayName,
+                  tone: session.status.acceptsCapture
+                      ? StatusTone.success
+                      : StatusTone.pending,
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Assessment: ${session.assessmentId}',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                Icon(
+                  Icons.people_outline,
+                  size: 18,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '${session.pendingCount} pending, '
+                    '${session.capturedCount} captured',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Full-width, not tucked beside the counts: this app's
+            // `filledButtonTheme` sets `minimumSize: Size.fromHeight(48)`,
+            // which is an *infinite* minimum width — a filled button laid out
+            // as a Row's non-flex child throws rather than shrinking.
+            if (session.status.acceptsCapture)
+              FilledButton.tonalIcon(
+                onPressed: () => context.go(
+                  '${RoutePaths.omrCapture}?sessionId=${session.sessionId}',
+                ),
+                icon: const Icon(Icons.photo_camera_outlined, size: 18),
+                label: const Text('Start capture'),
+              )
+            else
+              // A READY session cannot take a sheet until it is started, and
+              // starting it is the session screen's decision to own, not a
+              // side effect of opening the camera.
+              OutlinedButton.icon(
+                onPressed: () => context.push(
+                  RoutePaths.of(
+                    RoutePaths.assessmentSession,
+                    <String, String>{'sessionId': session.sessionId},
+                  ),
+                ),
+                icon: const Icon(Icons.play_arrow_outlined, size: 18),
+                label: const Text('Open session'),
+              ),
+          ],
+        ),
       ),
     );
   }

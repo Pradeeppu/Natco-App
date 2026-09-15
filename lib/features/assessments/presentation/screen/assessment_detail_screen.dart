@@ -17,6 +17,8 @@ import 'package:natco_app/core/errors/failure.dart';
 import 'package:natco_app/core/utils/result.dart';
 import 'package:natco_app/core/widgets/app_state_views.dart';
 import 'package:natco_app/core/widgets/status_chip.dart';
+import 'package:natco_app/features/assessment_sessions/domain/entity/assessment_session.dart';
+import 'package:natco_app/features/assessment_sessions/presentation/controller/session_controllers.dart';
 import 'package:natco_app/features/assessments/domain/entity/answer_key.dart';
 import 'package:natco_app/features/assessments/domain/entity/assessment.dart';
 import 'package:natco_app/features/assessments/domain/entity/assessment_assignment.dart';
@@ -157,6 +159,11 @@ final class _Body extends ConsumerWidget {
         Text('Where it is being sat', style: theme.textTheme.titleMedium),
         const SizedBox(height: 8),
         _Assignments(assessmentId: assessment.assessmentId),
+
+        const Divider(height: 32),
+        Text('Assessment sessions', style: theme.textTheme.titleMedium),
+        const SizedBox(height: 8),
+        _AssessmentSessions(assessmentId: assessment.assessmentId),
 
         if (session.authorization.can(Permission.viewResults) ||
             session.authorization.can(Permission.viewAnalytics) ||
@@ -514,6 +521,86 @@ final class _Row extends StatelessWidget {
           Expanded(child: Text(value, style: theme.textTheme.bodyMedium)),
         ],
       ),
+    );
+  }
+}
+
+final class _AssessmentSessions extends ConsumerWidget {
+  const _AssessmentSessions({required this.assessmentId});
+
+  final String assessmentId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final AsyncValue<List<AssessmentSession>> asyncSessions = ref.watch(
+      assessmentSessionsProvider(assessmentId),
+    );
+
+    return asyncSessions.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.all(12),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      ),
+      error: (Object error, StackTrace _) =>
+          Text(asFailure(error).userMessage, style: theme.textTheme.bodySmall),
+      data: (List<AssessmentSession> sessions) {
+        if (sessions.isEmpty) {
+          return Text(
+            'No sessions have been started for this assessment yet.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          );
+        }
+
+        // The whole tile navigates rather than carrying a trailing button:
+        // this app's `filledButtonTheme` sets an infinite minimum width
+        // (`Size.fromHeight`), so a filled button in a `ListTile.trailing`
+        // slot swallows the row.
+        return Column(
+          children: <Widget>[
+            for (final AssessmentSession session in sessions)
+              Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  onTap: () => context.push(
+                    RoutePaths.of(
+                      RoutePaths.assessmentSession,
+                      <String, String>{'sessionId': session.sessionId},
+                    ),
+                  ),
+                  title: Text(
+                    'Grade ${session.grade} • Section ${session.section}',
+                    style: theme.textTheme.titleSmall,
+                  ),
+                  subtitle: Text(
+                    '${session.pendingCount} pending, '
+                    '${session.capturedCount} captured',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      StatusChip(
+                        label: session.status.displayName,
+                        tone: switch (session.status) {
+                          SessionStatus.inProgress => StatusTone.success,
+                          SessionStatus.ready => StatusTone.pending,
+                          SessionStatus.completed => StatusTone.neutral,
+                          SessionStatus.abandoned => StatusTone.danger,
+                        },
+                      ),
+                      const Icon(Icons.chevron_right, size: 20),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
