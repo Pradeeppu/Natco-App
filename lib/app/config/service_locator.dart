@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:natco_app/app/config/app_config.dart';
+import 'package:natco_app/core/constants/collections.dart';
 import 'package:natco_app/core/services/audit_sink.dart';
 import 'package:natco_app/core/services/connectivity_service.dart';
 import 'package:natco_app/core/services/crash_reporter.dart';
@@ -308,11 +309,9 @@ final Provider<AssessmentSessionStore> assessmentSessionStoreProvider =
       if (!config.environment.usesFirebase) {
         return InMemoryAssessmentSessionStore(sessions: demoSessions());
       }
-      // Phase 9 replaces this with `HiveAssessmentSessionStore.open(...)`
-      // resolved at startup once the box is available; for now
-      // `prod`/`dev`/`staging` share the same in-memory behaviour rather
-      // than a half-wired Hive path with no sync engine to drain it.
-      return InMemoryAssessmentSessionStore();
+      return HiveAssessmentSessionStore(
+        ref.watch(hiveProvider).box<dynamic>(LocalBoxes.sessions),
+      );
     });
 
 final Provider<SessionRepository> sessionRepositoryProvider =
@@ -388,8 +387,9 @@ final Provider<SyncQueueDataSource> syncQueueDataSourceProvider =
       if (!config.environment.usesFirebase) {
         return InMemorySyncQueueDataSource();
       }
-      // Requires Hive box 'sync_queue' to be opened during init.
-      return HiveSyncQueueDataSource(ref.watch(hiveProvider).box<dynamic>('sync_queue'));
+      return HiveSyncQueueDataSource(
+        ref.watch(hiveProvider).box<dynamic>(LocalBoxes.syncQueue),
+      );
     });
 
 final Provider<SyncBackendService> syncBackendServiceProvider =

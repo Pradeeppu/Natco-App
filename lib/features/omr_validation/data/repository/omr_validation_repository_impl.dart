@@ -518,7 +518,7 @@ final class OmrValidationRepositoryImpl implements OmrValidationRepository {
       ),
     );
 
-    if (!result.sheetAligned || !result.omrIdReadable) {
+    if (!result.sheetAligned) {
       return resetToCaptured(omrId);
     }
 
@@ -546,9 +546,9 @@ final class OmrValidationRepositoryImpl implements OmrValidationRepository {
           syncId: _idGenerator.newId(),
           entityType: SyncEntityType.omrAnswer,
           entityId: '$omrId#q${q.questionNumber}',
-          operation: SyncOperation.update,
+          operation: SyncOperation.create,
           payloadRef: 'local/omr_answers/$omrId#q${q.questionNumber}',
-          idempotencyKey: 'update_answer_${omrId}_q${q.questionNumber}',
+          idempotencyKey: 'create_answer_${omrId}_q${q.questionNumber}',
           createdAt: _clock.nowUtc(),
           attemptCount: 0,
           status: SyncStatus.pending,

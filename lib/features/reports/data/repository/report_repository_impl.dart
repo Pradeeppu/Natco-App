@@ -90,6 +90,10 @@ final class ReportRepositoryImpl implements ReportRepository {
     required String actorUserId,
     required String actorRole,
   }) async {
+    _clusterNameCache = null;
+    _districtNameCache = null;
+    _studentNameCache.clear();
+
     final Result<List<List<Object?>>> rowsResult = await switch (type) {
       ReportType.studentResult => _studentResultRows(assessmentId, scope),
       ReportType.schoolSummary => _scopeSummaryRows(

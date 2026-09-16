@@ -34,7 +34,7 @@ import 'package:natco_app/features/students/data/repository/student_repository_i
 import 'package:natco_app/features/students/data/service/in_memory_student_data_source.dart';
 import 'package:natco_app/features/students/domain/repository/student_repository.dart';
 
-import '../../dummy_sync.dart';
+import '../../support/dummy_sync_queue_repository.dart';
 
 void main() {
   late InMemoryResultDataSource resultDataSource;

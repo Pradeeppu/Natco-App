@@ -139,11 +139,14 @@ final class SyncEngine {
     });
 
     for (final SyncQueueEntry entry in readyEntries) {
-      await _processEntry(entry);
+      final bool shouldContinue = await _processEntry(entry);
+      if (!shouldContinue) {
+        break;
+      }
     }
   }
 
-  Future<void> _processEntry(SyncQueueEntry entry) async {
+  Future<bool> _processEntry(SyncQueueEntry entry) async {
     // Mark as uploading
     final SyncQueueEntry uploadingEntry = entry.copyWith(
       status: SyncStatus.uploading,
@@ -165,9 +168,14 @@ final class SyncEngine {
         await _queueRepository.updateEntry(
           uploadingEntry.copyWith(status: SyncStatus.synced),
         );
+        return true;
 
       case FailureResult<void>(:final Failure failure):
         await _handleFailure(uploadingEntry, failure);
+        final bool isNetworkIssue = failure.code == FailureCode.network ||
+            failure.code == FailureCode.timeout ||
+            failure.code == FailureCode.offline;
+        return !isNetworkIssue;
     }
   }
 

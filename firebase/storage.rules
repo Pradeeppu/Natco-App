@@ -47,7 +47,7 @@ service firebase.storage {
 
     function canExportReports() {
       return role() in ['SUPER_ADMIN', 'ASSESSMENT_ADMIN', 'SUPERVISOR',
-                        'VIEWER'];
+                        'PST_TEACHER', 'VIEWER'];
     }
 
     function scopeLevel() { return claims().get('lvl', ''); }

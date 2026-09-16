@@ -1,6 +1,6 @@
 name: natco_app
 description: >-
-  NATCO Assessment App — offline-first, field-ready OMR assessment data
+  NCP Assessments — offline-first, field-ready OMR assessment data
   pipeline for school-based educational assessments.
 publish_to: 'none'
 
@@ -40,7 +40,6 @@ dependencies:
   internet_connection_checker_plus: ^3.1.2
 
   # ---- OMR capture & pure-Dart image processing
-  camera: ^0.12.1
   image_picker: ^1.2.3
   image: ^4.9.2
   path_provider: ^2.1.6
@@ -56,7 +55,7 @@ dependencies:
   package_info_plus: ^10.2.1
   device_info_plus: ^13.2.0
   cupertino_icons: ^1.0.8
-
+  google_mlkit_document_scanner: ^0.6.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -69,6 +68,9 @@ dev_dependencies:
   json_serializable: ^6.14.1
   hive_ce_generator: ^1.11.3
   mocktail: ^1.0.5
+  # Only for `Override` (package:riverpod/misc.dart) in test harness code —
+  # flutter_riverpod re-exports riverpod's main API but not this type.
+  riverpod: ^3.4.3
 
 flutter:
   uses-material-design: true

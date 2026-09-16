@@ -5,6 +5,7 @@
 library;
 
 import 'package:hive_ce_flutter/hive_flutter.dart';
+import 'package:natco_app/core/constants/collections.dart';
 import 'package:natco_app/core/services/logger.dart';
 
 /// Initialises Hive against the app's documents directory.
@@ -16,6 +17,8 @@ import 'package:natco_app/core/services/logger.dart';
 Future<void> initialiseLocalStorage({required AppLogger logger}) async {
   try {
     await Hive.initFlutter('natco');
+    await Hive.openBox<dynamic>(LocalBoxes.syncQueue);
+    await Hive.openBox<dynamic>(LocalBoxes.sessions);
   } catch (error, stackTrace) {
     logger.error(
       'local_storage_init_failed',

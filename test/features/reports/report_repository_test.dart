@@ -44,7 +44,7 @@ import 'package:natco_app/features/sync/domain/entity/sync_status.dart';
 import 'package:natco_app/features/sync/domain/repository/sync_queue_repository.dart';
 import 'package:natco_app/features/sync/domain/service/sync_conflict_policy.dart';
 
-import '../../dummy_sync.dart';
+import '../../support/dummy_sync_queue_repository.dart';
 
 final class _InMemoryQueueDataSource implements SyncQueueDataSource {
   final Map<String, SyncQueueEntry> _entries = <String, SyncQueueEntry>{};

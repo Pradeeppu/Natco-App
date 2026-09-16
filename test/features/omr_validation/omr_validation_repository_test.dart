@@ -20,7 +20,7 @@ import 'package:natco_app/features/omr_validation/domain/entity/omr_validation_r
 import 'package:natco_app/features/omr_validation/domain/service/omr_validation_policy.dart';
 import 'package:natco_app/features/schools/data/service/demo_master_data.dart';
 
-import '../../dummy_sync.dart';
+import '../../support/dummy_sync_queue_repository.dart';
 
 void main() {
   group('OmrValidationPolicy', () {
