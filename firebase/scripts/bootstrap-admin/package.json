@@ -1,0 +1,13 @@
+{
+  "name": "bootstrap-admin",
+  "private": true,
+  "version": "1.0.0",
+  "description": "One-time script to create the first Super Admin account (Auth user + Firestore profile + custom claims) on a fresh Firebase project, standing in for the onUserWrite Cloud Function until this project moves to the Blaze plan.",
+  "main": "bootstrap-admin.js",
+  "scripts": {
+    "start": "node bootstrap-admin.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  }
+}
