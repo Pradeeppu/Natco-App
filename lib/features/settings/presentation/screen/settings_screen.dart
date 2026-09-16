@@ -9,6 +9,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:natco_app/app/config/app_config.dart';
 import 'package:natco_app/app/config/service_locator.dart';
 import 'package:natco_app/core/constants/route_paths.dart';
@@ -96,8 +97,11 @@ final class SettingsScreen extends ConsumerWidget {
                 title: const Text('Scanner calibration'),
                 subtitle: const Text('Measure accuracy and set thresholds'),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () =>
-                    Navigator.of(context).pushNamed(RoutePaths.calibration),
+                // Not `Navigator.of(context).pushNamed`: this app has no
+                // classic named-route table (routing is declarative, via
+                // go_router) — `pushNamed` here would throw at runtime for
+                // want of a route generator.
+                onTap: () => context.push(RoutePaths.calibration),
               ),
             if (config.featureFlags.showDiagnosticsScreen) ...<Widget>[
               const Divider(),

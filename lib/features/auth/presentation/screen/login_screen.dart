@@ -161,7 +161,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'NATCO Assessment',
+                      'NCP Assessments',
                       textAlign: TextAlign.center,
                       style: theme.textTheme.headlineSmall,
                     ),

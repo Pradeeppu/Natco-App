@@ -14,7 +14,7 @@ void main() {
       WidgetTester tester,
     ) async {
       await pumpApp(tester);
-      expect(find.text('NATCO Assessment'), findsOneWidget);
+      expect(find.text('NCP Assessments'), findsOneWidget);
       expect(find.text('Sign in'), findsOneWidget);
       expect(find.widgetWithText(TextFormField, 'Email address'), findsOne);
       expect(find.widgetWithText(TextFormField, 'Password'), findsOne);

@@ -18,9 +18,10 @@ library;
 
 import 'package:flutter/material.dart';
 
-/// Brand seed. A deep teal reads as institutional and calm rather than
-/// childish, and stays legible in bright outdoor light.
-const Color kNatcoSeed = Color(0xFF12595B);
+/// Brand seed. A calm, high-contrast institutional blue — reads as
+/// professional rather than playful, and stays legible in bright outdoor
+/// light.
+const Color kNatcoSeed = Color(0xFF1F4E79);
 
 /// Semantic colours that Material's scheme does not provide.
 ///

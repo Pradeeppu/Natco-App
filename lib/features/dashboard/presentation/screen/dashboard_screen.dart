@@ -51,7 +51,10 @@ final class DashboardScreen extends ConsumerWidget {
         title: const Text('Dashboard'),
         actions: <Widget>[
           IconButton(
-            onPressed: () => context.go(RoutePaths.settings),
+            // `push`, not `go`: `go` replaces the current location outright,
+            // leaving nothing on the stack for the settings screen's back
+            // button (or the hardware back gesture) to return to.
+            onPressed: () => context.push(RoutePaths.settings),
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'Settings',
           ),

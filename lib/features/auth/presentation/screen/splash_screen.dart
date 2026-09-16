@@ -26,10 +26,10 @@ final class SplashScreen extends StatelessWidget {
                 color: theme.colorScheme.primary,
               ),
               const SizedBox(height: 20),
-              Text('NATCO', style: theme.textTheme.headlineMedium),
+              Text('NCP', style: theme.textTheme.headlineMedium),
               const SizedBox(height: 4),
               Text(
-                'Assessment',
+                'Assessments',
                 style: theme.textTheme.titleMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),

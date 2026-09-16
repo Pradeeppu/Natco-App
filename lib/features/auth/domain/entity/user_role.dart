@@ -13,11 +13,11 @@ import 'package:natco_app/features/auth/domain/entity/permission.dart';
 enum UserRole {
   superAdmin('SUPER_ADMIN', 'Super Admin'),
 
-  /// Called "NATCO Admin" on screen. The wire name stays `ASSESSMENT_ADMIN`
+  /// Called "NCP Admin" on screen. The wire name stays `ASSESSMENT_ADMIN`
   /// because it is written into custom claims, stored user documents and
   /// `firebase/firestore.rules`; renaming it would invalidate every existing
   /// session and role document to change a label.
-  assessmentAdmin('ASSESSMENT_ADMIN', 'NATCO Admin'),
+  assessmentAdmin('ASSESSMENT_ADMIN', 'NCP Admin'),
   supervisor('SUPERVISOR', 'Supervisor'),
   pstTeacher('PST_TEACHER', 'PST Teacher'),
   scannerOperator('SCANNER_OPERATOR', 'Scanner Operator'),

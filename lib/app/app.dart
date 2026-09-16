@@ -61,7 +61,7 @@ class _NatcoAppState extends ConsumerState<NatcoApp>
   Widget build(BuildContext context) {
     final GoRouter router = ref.watch(routerProvider);
     return MaterialApp.router(
-      title: 'NATCO Assessment',
+      title: 'NCP Assessments',
       debugShowCheckedModeBanner: false,
       theme: NatcoTheme.light(),
       darkTheme: NatcoTheme.dark(),

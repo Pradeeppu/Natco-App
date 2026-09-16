@@ -79,7 +79,7 @@ void main() {
       );
     });
 
-    test('NATCO Admin holds exactly its documented set', () {
+    test('NCP Admin holds exactly its documented set', () {
       expect(UserRole.assessmentAdmin.permissions, <Permission>{
         Permission.viewDashboard,
         Permission.viewSchools,

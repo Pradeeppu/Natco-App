@@ -3,7 +3,7 @@
          photo picker via image_picker and needs no storage permission. -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <application
-        android:label="natco_app"
+        android:label="NCP Assessments"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
