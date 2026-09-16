@@ -10,13 +10,18 @@
 /// Function (`backupOmrCapture`, in `firebase/functions/`) is provisioned;
 /// none of that exists in this repository, since it's per-deployment
 /// configuration, not code.
+///
+/// NOTE: Drive backup requires Cloud Functions, which in turn requires the
+/// Firebase Blaze (pay-as-you-go) plan. On the Spark free plan the
+/// [NoOpOmrDriveBackupService] is wired instead — it returns `false` on every
+/// call, which is the documented "best-effort" failure contract. No data is
+/// lost: the sheet is already stored durably in Hive and synced to Firestore
+/// via the normal sync queue. To enable real Drive backup, upgrade the project
+/// to Blaze, deploy `firebase/functions/`, and swap the wiring in
+/// `service_locator.dart` to a `FirebaseOmrDriveBackupService` implementation.
 library;
 
-import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
-
-import 'package:cloud_functions/cloud_functions.dart';
 
 abstract interface class OmrDriveBackupService {
   /// Best-effort: returns `false` on any failure rather than throwing, since
@@ -29,45 +34,18 @@ abstract interface class OmrDriveBackupService {
   });
 }
 
-/// Calls the `backupOmrCapture` Cloud Function.
-final class FirebaseOmrDriveBackupService implements OmrDriveBackupService {
-  FirebaseOmrDriveBackupService({
-    Future<Object?> Function(Map<String, Object?> data)? invoke,
-  }) : _invoke = invoke ?? _defaultInvoke;
-
-  /// The actual call, injected so `omr_drive_backup_service_test.dart` can
-  /// swap in a fake — `FirebaseFunctions.instance` itself isn't fakeable,
-  /// and `HttpsCallableResult` has no public constructor a fake could return
-  /// either, hence returning the decoded `.data` directly rather than the
-  /// wrapper.
-  final Future<Object?> Function(Map<String, Object?> data) _invoke;
-
-  static Future<Object?> _defaultInvoke(Map<String, Object?> data) async {
-    final HttpsCallableResult<Object?> result = await FirebaseFunctions
-        .instance
-        .httpsCallable('backupOmrCapture')
-        .call<Object?>(data);
-    return result.data;
-  }
+/// No-op implementation used when Cloud Functions are not available (Spark
+/// free plan). Returns `false` so callers know the backup did not run, but
+/// never throws — consistent with the best-effort contract of the interface.
+final class NoOpOmrDriveBackupService implements OmrDriveBackupService {
+  const NoOpOmrDriveBackupService();
 
   @override
   Future<bool> backup({
     required File file,
     required String folderName,
     required String fileName,
-  }) async {
-    try {
-      final Uint8List bytes = await file.readAsBytes();
-      final Object? data = await _invoke(<String, Object?>{
-        'folderName': folderName,
-        'fileName': fileName,
-        'imageBase64': base64Encode(bytes),
-      });
-      return data is Map && data['success'] == true;
-    } catch (e) {
-      return false;
-    }
-  }
+  }) async => false;
 }
 
 /// Demo/test implementation: simulates a working backup with no network

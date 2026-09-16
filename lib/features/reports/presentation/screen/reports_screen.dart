@@ -12,6 +12,8 @@
 /// than claim a save succeeded that was never actually exercised.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,6 +25,8 @@ import 'package:natco_app/features/auth/presentation/controller/session_state.da
 import 'package:natco_app/features/reports/domain/entity/generated_report.dart';
 import 'package:natco_app/features/reports/domain/entity/report_type.dart';
 import 'package:natco_app/features/reports/presentation/controller/report_controllers.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 final class ReportsScreen extends ConsumerWidget {
   const ReportsScreen({super.key});
@@ -161,6 +165,26 @@ final class _GeneratedReportCard extends ConsumerWidget {
 
   final GeneratedReport report;
 
+  Future<void> _share(BuildContext context) async {
+    try {
+      final Directory tmp = await getTemporaryDirectory();
+      final File file = File('${tmp.path}/${report.fileName}');
+      await file.writeAsString(report.csvContent);
+      await SharePlus.instance.share(
+        ShareParams(
+          files: <XFile>[XFile(file.path, mimeType: 'text/csv')],
+          subject: report.fileName,
+        ),
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not share the file. Please try again.')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
@@ -180,6 +204,12 @@ final class _GeneratedReportCard extends ConsumerWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(report.fileName, style: theme.textTheme.titleSmall),
+                ),
+                // Share / save to device
+                IconButton(
+                  onPressed: () => _share(context),
+                  icon: const Icon(Icons.share_outlined),
+                  tooltip: 'Share / Save CSV',
                 ),
                 IconButton(
                   onPressed: () => ref

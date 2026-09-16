@@ -1,15 +1,15 @@
-/// Tests for [FirebaseOmrDriveBackupService] and [FakeOmrDriveBackupService].
+/// Tests for [NoOpOmrDriveBackupService] and [FakeOmrDriveBackupService].
 ///
-/// The real service's only logic is: base64-encode the file, call the
-/// injected invoker, and turn its result (or a thrown exception) into a
-/// plain `bool` — everything Drive-specific now lives server-side, in
-/// `firebase/functions/src/driveBackup.ts`, which has its own Jest tests.
-/// `FirebaseFunctions.instance` itself isn't fakeable, so the invocation is
-/// injected here exactly the way the old client-side Drive logic injected
-/// `DriveFilesApi` earlier this session.
+/// `FirebaseOmrDriveBackupService` (which called the `backupOmrCapture`
+/// Cloud Function — still built and tested independently in
+/// `firebase/functions/src/driveBackup.test.ts`) is not wired into
+/// `service_locator.dart` for now: Cloud Functions require the Firebase
+/// Blaze plan, and this project defaults to the free Spark plan until
+/// someone deliberately upgrades. `NoOpOmrDriveBackupService` is what real
+/// (non-demo) environments get instead — see
+/// `omr_drive_backup_service.dart`'s doc comment.
 library;
 
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -30,46 +30,9 @@ void main() {
     await tempDir.delete(recursive: true);
   });
 
-  group('FirebaseOmrDriveBackupService', () {
-    test('encodes the file and returns true when the function reports success', () async {
-      Map<String, Object?>? sentData;
-      final FirebaseOmrDriveBackupService service = FirebaseOmrDriveBackupService(
-        invoke: (Map<String, Object?> data) async {
-          sentData = data;
-          return <String, Object?>{'success': true};
-        },
-      );
-
-      final bool result = await service.backup(
-        file: file,
-        folderName: 'OMR_Captures_as_demo',
-        fileName: 'sheet.jpg',
-      );
-
-      expect(result, isTrue);
-      expect(sentData?['folderName'], 'OMR_Captures_as_demo');
-      expect(sentData?['fileName'], 'sheet.jpg');
-      expect(sentData?['imageBase64'], base64Encode(<int>[1, 2, 3, 4, 5]));
-    });
-
-    test('returns false when the function reports failure', () async {
-      final FirebaseOmrDriveBackupService service = FirebaseOmrDriveBackupService(
-        invoke: (_) async => <String, Object?>{'success': false},
-      );
-
-      final bool result = await service.backup(
-        file: file,
-        folderName: 'OMR_Captures_as_demo',
-        fileName: 'sheet.jpg',
-      );
-
-      expect(result, isFalse);
-    });
-
-    test('a thrown exception is reported as false, never rethrown', () async {
-      final FirebaseOmrDriveBackupService service = FirebaseOmrDriveBackupService(
-        invoke: (_) async => throw Exception('offline'),
-      );
+  group('NoOpOmrDriveBackupService', () {
+    test('always reports false, without throwing or touching the network', () async {
+      const NoOpOmrDriveBackupService service = NoOpOmrDriveBackupService();
 
       final bool result = await service.backup(
         file: file,
@@ -81,8 +44,8 @@ void main() {
         result,
         isFalse,
         reason:
-            'the capture flow treats this as fire-and-forget best-effort '
-            'backup — it must never surface as an unhandled exception',
+            'the caller must be able to tell the backup did not run — a '
+            'silent true would be a lie about what actually happened',
       );
     });
   });

@@ -381,7 +381,11 @@ final Provider<OmrDriveBackupService> omrDriveBackupServiceProvider =
       if (!config.environment.usesFirebase) {
         return const FakeOmrDriveBackupService();
       }
-      return FirebaseOmrDriveBackupService();
+      // Real Drive backup needs the `backupOmrCapture` Cloud Function,
+      // which needs the Blaze plan — see omr_drive_backup_service.dart's
+      // doc comment. No-op until that's provisioned; nothing is lost, the
+      // sheet is already durable and synced without this.
+      return const NoOpOmrDriveBackupService();
     });
 
 // ---------------------------------------------------------------------- sync
