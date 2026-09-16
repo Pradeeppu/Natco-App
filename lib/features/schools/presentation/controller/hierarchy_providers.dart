@@ -14,6 +14,7 @@ import 'package:natco_app/features/auth/domain/entity/access_scope.dart';
 import 'package:natco_app/features/auth/presentation/controller/session_state.dart';
 import 'package:natco_app/features/schools/domain/entity/cluster.dart';
 import 'package:natco_app/features/schools/domain/entity/district.dart';
+import 'package:natco_app/features/schools/domain/entity/school.dart';
 import 'package:natco_app/features/schools/domain/entity/state_entity.dart';
 import 'package:natco_app/features/schools/domain/repository/school_hierarchy_repository.dart';
 
@@ -84,3 +85,19 @@ final clustersProvider =
       );
       return result.map((Page<Cluster> p) => p.items);
     });
+
+/// A single school by id, for resolving a name against something that only
+/// carries a `schoolId` (e.g. `AssessmentSession`) — mirrors
+/// `assessmentProvider` in `assessment_controllers.dart`.
+final schoolProvider = FutureProvider.family<School, String>((
+  Ref ref,
+  String schoolId,
+) async {
+  final Result<School> result = await ref
+      .watch(schoolHierarchyRepositoryProvider)
+      .getSchool(schoolId);
+  return switch (result) {
+    Success<School>(:final School value) => value,
+    FailureResult<School>(:final failure) => throw failure,
+  };
+});

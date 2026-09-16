@@ -9,12 +9,10 @@
 ///
 /// Two choices worth naming:
 ///
-/// * There is no live camera preview here. `image_picker`'s camera source
-///   hands the whole capture UI to the device's own camera app and returns a
-///   file — one less custom camera lifecycle to get wrong, and the same
-///   photo either way. A future iteration can build a live preview with
-///   `package:camera` if framing guidance turns out to matter more than this
-///   simplification costs.
+/// * We use `google_mlkit_document_scanner` on Android/iOS to provide a
+///   beautiful edge-detecting, perspective-correcting "Adobe Scan" style UI.
+///   On platforms where this isn't supported (like Web or Windows), we fall
+///   back to the standard `image_picker` camera.
 /// * The OMR ID is typed by hand. Reading it off the sheet automatically is
 ///   phase 6's job (bubble-grid decoding); until that pipeline exists, the
 ///   person capturing is the only source for it.
@@ -25,12 +23,15 @@
 /// database row, never the evidence.
 library;
 
-import 'dart:io' show Directory;
+import 'dart:async' show unawaited;
+import 'dart:io' show Directory, File, Platform;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show compute, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:natco_app/app/config/service_locator.dart';
 import 'package:natco_app/core/constants/route_paths.dart';
@@ -44,12 +45,19 @@ import 'package:natco_app/features/assessments/domain/entity/assessment.dart';
 import 'package:natco_app/features/assessments/presentation/controller/assessment_controllers.dart';
 import 'package:natco_app/features/auth/domain/entity/app_user.dart';
 import 'package:natco_app/features/auth/domain/entity/permission.dart';
+import 'package:natco_app/features/omr_capture/domain/service/omr_drive_backup_service.dart';
 import 'package:natco_app/features/omr_processing/domain/entity/image_quality_report.dart';
 import 'package:natco_app/features/omr_processing/domain/entity/omr_submission.dart';
+import 'package:natco_app/features/omr_processing/domain/entity/omr_template.dart';
 import 'package:natco_app/features/omr_processing/domain/service/image_quality_analyzer.dart';
 import 'package:natco_app/features/omr_processing/domain/service/omr_image_writer.dart';
+import 'package:natco_app/features/schools/domain/entity/school.dart';
+import 'package:natco_app/features/schools/presentation/controller/hierarchy_providers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart' as ph;
+
+Result<ImageQualityReport> _analyzeQualityIsolate(Uint8List bytes) =>
+    ImageQualityAnalyzer.analyze(imageBytes: bytes);
 
 final class OmrCaptureScreen extends ConsumerWidget {
   const OmrCaptureScreen({super.key});
@@ -71,11 +79,23 @@ final class OmrCaptureScreen extends ConsumerWidget {
   }
 }
 
-final class _SessionPicker extends ConsumerWidget {
+final class _SessionPicker extends ConsumerStatefulWidget {
   const _SessionPicker();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_SessionPicker> createState() => _SessionPickerState();
+}
+
+class _SessionPickerState extends ConsumerState<_SessionPicker> {
+  // Filters, not a wizard: with nothing picked every open session in scope
+  // still shows below exactly as before, so a teacher with a single class
+  // (the common case) never has to touch these to start capturing.
+  String? _schoolFilter;
+  String? _gradeFilter;
+  String? _sectionFilter;
+
+  @override
+  Widget build(BuildContext context) {
     final AsyncValue<List<AssessmentSession>> asyncSessions = ref.watch(
       openSessionsProvider,
     );
@@ -109,6 +129,49 @@ final class _SessionPicker extends ConsumerWidget {
         }
 
         final ThemeData theme = Theme.of(context);
+
+        final List<String> schoolIds = <String>{
+          for (final AssessmentSession s in sessions) s.schoolId,
+        }.toList(growable: false)..sort();
+        // Options never include a value already off the list (e.g. a
+        // session closed elsewhere) — `DropdownButtonFormField` requires its
+        // current value to be one of its items.
+        final String? schoolFilter = schoolIds.contains(_schoolFilter)
+            ? _schoolFilter
+            : null;
+
+        final List<AssessmentSession> bySchool = schoolFilter == null
+            ? sessions
+            : sessions
+                  .where((AssessmentSession s) => s.schoolId == schoolFilter)
+                  .toList(growable: false);
+
+        final List<String> grades = <String>{
+          for (final AssessmentSession s in bySchool) s.grade,
+        }.toList(growable: false)..sort();
+        final String? gradeFilter = grades.contains(_gradeFilter)
+            ? _gradeFilter
+            : null;
+
+        final List<AssessmentSession> byGrade = gradeFilter == null
+            ? bySchool
+            : bySchool
+                  .where((AssessmentSession s) => s.grade == gradeFilter)
+                  .toList(growable: false);
+
+        final List<String> sections = <String>{
+          for (final AssessmentSession s in byGrade) s.section,
+        }.toList(growable: false)..sort();
+        final String? sectionFilter = sections.contains(_sectionFilter)
+            ? _sectionFilter
+            : null;
+
+        final List<AssessmentSession> visible = sectionFilter == null
+            ? byGrade
+            : byGrade
+                  .where((AssessmentSession s) => s.section == sectionFilter)
+                  .toList(growable: false);
+
         return ListView(
           padding: const EdgeInsets.all(16),
           children: <Widget>[
@@ -118,17 +181,104 @@ final class _SessionPicker extends ConsumerWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Choose an in-progress session to begin capturing and validating student sheets.',
+              'Filter by school, grade and section to find the right class, '
+              'or pick straight from the list below.',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 16),
-            for (final AssessmentSession session in sessions)
-              _SessionCard(session: session),
+            DropdownButtonFormField<String?>(
+              initialValue: schoolFilter,
+              // Long school names would otherwise force the closed dropdown
+              // wider than the screen instead of truncating with ellipsis —
+              // `isExpanded` constrains it to the available width.
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'School'),
+              items: <DropdownMenuItem<String?>>[
+                const DropdownMenuItem<String?>(
+                  child: Text('All schools'),
+                ),
+                for (final String id in schoolIds)
+                  DropdownMenuItem<String?>(
+                    value: id,
+                    child: _SchoolLabel(schoolId: id),
+                  ),
+              ],
+              onChanged: (String? value) => setState(() {
+                _schoolFilter = value;
+                _gradeFilter = null;
+                _sectionFilter = null;
+              }),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String?>(
+              initialValue: gradeFilter,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Grade'),
+              items: <DropdownMenuItem<String?>>[
+                const DropdownMenuItem<String?>(child: Text('All grades')),
+                for (final String grade in grades)
+                  DropdownMenuItem<String?>(
+                    value: grade,
+                    child: Text('Grade $grade'),
+                  ),
+              ],
+              onChanged: (String? value) => setState(() {
+                _gradeFilter = value;
+                _sectionFilter = null;
+              }),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String?>(
+              initialValue: sectionFilter,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Section'),
+              items: <DropdownMenuItem<String?>>[
+                const DropdownMenuItem<String?>(child: Text('All sections')),
+                for (final String section in sections)
+                  DropdownMenuItem<String?>(
+                    value: section,
+                    child: Text('Section $section'),
+                  ),
+              ],
+              onChanged: (String? value) =>
+                  setState(() => _sectionFilter = value),
+            ),
+            const SizedBox(height: 20),
+            if (visible.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Text(
+                  'No open session matches that filter.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              )
+            else
+              for (final AssessmentSession session in visible)
+                _SessionCard(session: session),
           ],
         );
       },
+    );
+  }
+}
+
+/// A school's name, resolved from its id for the school filter dropdown —
+/// `AssessmentSession` only carries `schoolId`, never a name.
+final class _SchoolLabel extends ConsumerWidget {
+  const _SchoolLabel({required this.schoolId});
+
+  final String schoolId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AsyncValue<School> school = ref.watch(schoolProvider(schoolId));
+    return Text(
+      school.whenOrNull(data: (School s) => s.schoolName) ?? schoolId,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }
@@ -341,6 +491,24 @@ class _CaptureBodyState extends ConsumerState<_CaptureBody> {
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: const BorderRadius.all(Radius.circular(4)),
+            child: LinearProgressIndicator(
+              value: widget.session.totalStudents == 0
+                  ? 0
+                  : widget.session.capturedCount / widget.session.totalStudents,
+              minHeight: 6,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Batch: ${widget.session.capturedCount} of '
+            '${widget.session.totalStudents} captured',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
           const SizedBox(height: 20),
           DropdownButtonFormField<String>(
             initialValue: _studentId,
@@ -358,9 +526,15 @@ class _CaptureBodyState extends ConsumerState<_CaptureBody> {
           const SizedBox(height: 16),
           TextField(
             controller: _omrIdController,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'OMR ID',
-              helperText: 'Printed on the sheet — read it by hand for now.',
+              helperText: 'Printed on the sheet — read it by hand for now. '
+                  'School, grade, section and assessment are already set '
+                  'for this whole batch (Grade ${widget.session.grade} • '
+                  'Section ${widget.session.section} • '
+                  '${widget.session.assessmentId}) — you only pick the '
+                  'student and the sheet.',
+              helperMaxLines: 3,
             ),
             onChanged: (_) => setState(() {}),
           ),
@@ -500,6 +674,49 @@ class _CaptureBodyState extends ConsumerState<_CaptureBody> {
   }
 
   Future<void> _pickImage(ImageSource source) async {
+    if (source == ImageSource.camera && !kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        final DocumentScanner scanner = DocumentScanner(
+          options: DocumentScannerOptions(
+            documentFormats: const {DocumentFormat.jpeg},
+            mode: ScannerMode.full,
+            pageLimit: 1,
+            isGalleryImport: true,
+          ),
+        );
+
+        final DocumentScanningResult scannerResult = await scanner.scanDocument();
+        if (scannerResult.images == null || scannerResult.images!.isEmpty || !mounted) {
+          return;
+        }
+
+        final Uint8List bytes = await File(scannerResult.images!.first).readAsBytes();
+        setState(() => _busy = true);
+        final Result<ImageQualityReport> qualityResult = await compute(
+          _analyzeQualityIsolate,
+          bytes,
+        );
+        if (!mounted) {
+          return;
+        }
+        setState(() => _busy = false);
+        qualityResult.fold(
+          onSuccess: (ImageQualityReport report) => setState(() {
+            _imageBytes = bytes;
+            _quality = report;
+            _overrideReason = null;
+          }),
+          onFailure: (Failure failure) => _showMessage(failure.userMessage),
+        );
+        return;
+      } catch (e) {
+        // Fall back to ImagePicker if scanner fails
+        if (mounted) {
+          setState(() => _busy = false);
+        }
+      }
+    }
+
     if (source == ImageSource.camera) {
       final ph.PermissionStatus status = await ph.Permission.camera.request();
       if (!status.isGranted) {
@@ -528,12 +745,15 @@ class _CaptureBodyState extends ConsumerState<_CaptureBody> {
     }
 
     final Uint8List bytes = await file.readAsBytes();
-    final Result<ImageQualityReport> result = ImageQualityAnalyzer.analyze(
-      imageBytes: bytes,
+    setState(() => _busy = true);
+    final Result<ImageQualityReport> result = await compute(
+      _analyzeQualityIsolate,
+      bytes,
     );
     if (!mounted) {
       return;
     }
+    setState(() => _busy = false);
     result.fold(
       onSuccess: (ImageQualityReport report) => setState(() {
         _imageBytes = bytes;
@@ -580,6 +800,32 @@ class _CaptureBodyState extends ConsumerState<_CaptureBody> {
         return;
       }
 
+      // Back up to Drive (fire-and-forget so it doesn't block capture flow).
+      // No Google sign-in on device: this calls a Cloud Function that holds
+      // the shared credential server-side — see
+      // docs/13-google-drive-backup-setup.md.
+      final OmrDriveBackupService driveBackupService = ref.read(
+        omrDriveBackupServiceProvider,
+      );
+      final String fileName = '${omrId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final String folderName = 'OMR_Captures_${widget.session.assessmentId}';
+
+      unawaited(
+        driveBackupService
+            .backup(
+              file: File(written.valueOrNull!),
+              folderName: folderName,
+              fileName: fileName,
+            )
+            .then((bool success) {
+          if (success && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Image backed up to Google Drive ($folderName)')),
+            );
+          }
+        }),
+      );
+
       final Result<OmrSubmission> created = await ref
           .read(omrValidationRepositoryProvider)
           .createSubmission(
@@ -619,6 +865,18 @@ class _CaptureBodyState extends ConsumerState<_CaptureBody> {
         return;
       }
       ref.invalidate(assessmentSessionProvider(widget.session.sessionId));
+
+      // Trigger background OMR processing so the sheet is decoded into answers and advances status
+      unawaited(
+        ref
+            .read(omrValidationRepositoryProvider)
+            .processSubmission(
+              omrId,
+              template: OmrTemplate.natcoV1(),
+              questionCount: assessment.totalQuestions,
+            ),
+      );
+
       attached.fold(
         onSuccess: (_) => _showMessage('Captured. Ready for the next student.'),
         onFailure: (Failure failure) => _showMessage(

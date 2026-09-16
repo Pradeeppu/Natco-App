@@ -10,8 +10,19 @@ firebase/
 ├── firebase.json            deploy targets
 ├── firestore.rules          collection access + the invariants below
 ├── firestore.indexes.json   composite indexes the app's queries need
-└── storage.rules            object access; originals are write-once
+├── storage.rules            object access; originals are write-once
+└── functions/               Cloud Functions — see note below
 ```
+
+**Note on Functions**: most of this document (and `docs/00-project-status.md`
+/ `docs/03-firestore-schema.md`) describes several Cloud Functions
+(`onUserWrite`, `publishAnswerKey`, `scoreSubmission`, `enforceRetention`) as
+if they exist. As of this writing **none of them do** — `functions/`
+contains exactly one function, `backupOmrCapture`
+(`docs/13-google-drive-backup-setup.md`), added separately from the rules
+below. The rules text is otherwise accurate to what's actually written in
+`firestore.rules`/`storage.rules`; the functions it assumes are documented
+design, not yet built code.
 
 ## Deploying
 

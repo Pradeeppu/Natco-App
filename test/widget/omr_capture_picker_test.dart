@@ -18,13 +18,73 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:natco_app/app/router.dart';
 import 'package:natco_app/core/constants/route_paths.dart';
 import 'package:natco_app/features/assessment_sessions/data/service/demo_session_data.dart';
+import 'package:natco_app/features/assessment_sessions/domain/entity/assessment_session.dart';
+import 'package:natco_app/features/assessment_sessions/presentation/controller/session_controllers.dart';
 import 'package:natco_app/features/auth/data/service/in_memory_auth_service.dart';
 import 'package:natco_app/features/auth/domain/entity/access_scope.dart';
 import 'package:natco_app/features/auth/domain/entity/user_role.dart';
 import 'package:natco_app/features/schools/data/service/demo_master_data.dart';
+import 'package:riverpod/misc.dart' show Override;
 
 import 'role_navigation_test.dart' show goTo;
 import 'test_harness.dart';
+
+/// Two open sessions at two different schools/grades/sections, so the
+/// filter dropdowns have something real to narrow between. `demo_session_data`
+/// seeds only one session, which is enough to prove the dropdowns don't add
+/// friction to the common case (see the tests above) but not enough to prove
+/// they actually narrow anything.
+List<AssessmentSession> _twoSchoolSessions() {
+  final DateTime createdAt = DateTime.utc(2026, 9, 15, 9);
+  return <AssessmentSession>[
+    AssessmentSession(
+      sessionId: 'ses_filter_a',
+      assessmentId: 'as_filter_a',
+      answerKeyVersion: 1,
+      schoolId: DemoHierarchyIds.schoolId1,
+      clusterId: DemoHierarchyIds.clusterId1,
+      districtId: DemoHierarchyIds.districtId1,
+      stateId: DemoHierarchyIds.stateId,
+      grade: '5',
+      section: 'A',
+      status: SessionStatus.inProgress,
+      conductedBy: 'demo_teacher',
+      createdAt: createdAt,
+      updatedAt: createdAt,
+      roster: const <SessionRosterEntry>[
+        SessionRosterEntry(
+          studentId: 'stu_filter_a',
+          studentName: 'Filter Test A',
+          grade: '5',
+          section: 'A',
+        ),
+      ],
+    ),
+    AssessmentSession(
+      sessionId: 'ses_filter_b',
+      assessmentId: 'as_filter_b',
+      answerKeyVersion: 1,
+      schoolId: DemoHierarchyIds.schoolId2,
+      clusterId: DemoHierarchyIds.clusterId1,
+      districtId: DemoHierarchyIds.districtId1,
+      stateId: DemoHierarchyIds.stateId,
+      grade: '6',
+      section: 'B',
+      status: SessionStatus.inProgress,
+      conductedBy: 'demo_teacher',
+      createdAt: createdAt,
+      updatedAt: createdAt,
+      roster: const <SessionRosterEntry>[
+        SessionRosterEntry(
+          studentId: 'stu_filter_b',
+          studentName: 'Filter Test B',
+          grade: '6',
+          section: 'B',
+        ),
+      ],
+    ),
+  ];
+}
 
 void main() {
   group('capture with no session attached', () {
@@ -95,5 +155,68 @@ void main() {
       expect(find.text('Grade 5 • Section A'), findsNothing);
       expect(find.text('No active assessment sessions'), findsOneWidget);
     });
+  });
+
+  group('school / grade / section filters', () {
+    testWidgets(
+      'default to "All" and show every open session, unfiltered',
+      (WidgetTester tester) async {
+        final ProviderContainer container = await pumpApp(
+          tester,
+          accounts: <DemoAccount>[testAccount(UserRole.superAdmin)],
+          overrides: <Override>[
+            openSessionsProvider.overrideWith(
+              (Ref ref) async => _twoSchoolSessions(),
+            ),
+          ],
+        );
+        await signInAs(tester, container, UserRole.superAdmin);
+        await goTo(tester, container, RoutePaths.omrCapture);
+
+        expect(
+          find.widgetWithText(DropdownButtonFormField<String?>, 'All schools'),
+          findsOneWidget,
+        );
+        expect(
+          find.widgetWithText(DropdownButtonFormField<String?>, 'All grades'),
+          findsOneWidget,
+        );
+        expect(
+          find.widgetWithText(DropdownButtonFormField<String?>, 'All sections'),
+          findsOneWidget,
+        );
+        // Both sessions render, exactly as the unfiltered list did before
+        // these dropdowns existed.
+        expect(find.text('Grade 5 • Section A'), findsOneWidget);
+        expect(find.text('Grade 6 • Section B'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'picking a school narrows the list to that school\'s sessions',
+      (WidgetTester tester) async {
+        final ProviderContainer container = await pumpApp(
+          tester,
+          accounts: <DemoAccount>[testAccount(UserRole.superAdmin)],
+          overrides: <Override>[
+            openSessionsProvider.overrideWith(
+              (Ref ref) async => _twoSchoolSessions(),
+            ),
+          ],
+        );
+        await signInAs(tester, container, UserRole.superAdmin);
+        await goTo(tester, container, RoutePaths.omrCapture);
+
+        await tester.tap(
+          find.widgetWithText(DropdownButtonFormField<String?>, 'All schools'),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Riverside Upper Primary School').last);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Grade 6 • Section B'), findsOneWidget);
+        expect(find.text('Grade 5 • Section A'), findsNothing);
+      },
+    );
   });
 }

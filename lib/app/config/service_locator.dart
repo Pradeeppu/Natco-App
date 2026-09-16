@@ -46,6 +46,7 @@ import 'package:natco_app/features/auth/data/store/session_store.dart';
 import 'package:natco_app/features/auth/domain/repository/auth_repository.dart';
 import 'package:natco_app/features/auth/presentation/controller/session_controller.dart';
 import 'package:natco_app/features/auth/presentation/controller/session_state.dart';
+import 'package:natco_app/features/omr_capture/domain/service/omr_drive_backup_service.dart';
 import 'package:natco_app/features/omr_validation/data/repository/omr_validation_repository_impl.dart';
 import 'package:natco_app/features/omr_validation/data/service/demo_omr_data.dart';
 import 'package:natco_app/features/omr_validation/data/service/firestore_omr_validation_data_source.dart';
@@ -370,6 +371,17 @@ final StreamProvider<ConnectionStatus> connectionStatusProvider =
       final ConnectivityService service = ref.watch(connectivityProvider);
       yield await service.current();
       yield* service.changes();
+    });
+
+// --------------------------------------------------------------- omr capture
+
+final Provider<OmrDriveBackupService> omrDriveBackupServiceProvider =
+    Provider<OmrDriveBackupService>((Ref ref) {
+      final AppConfig config = ref.watch(appConfigProvider);
+      if (!config.environment.usesFirebase) {
+        return const FakeOmrDriveBackupService();
+      }
+      return FirebaseOmrDriveBackupService();
     });
 
 // ---------------------------------------------------------------------- sync
