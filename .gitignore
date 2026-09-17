@@ -87,6 +87,15 @@ android/key.properties
 .env.*
 !.env.example
 
+# Real student rosters (names, dates of birth, guardian names) supplied for
+# generating anonymised demo data — never committed. The anonymised output
+# lives in lib/features/schools/data/service/demo_real_roster_data.dart,
+# which carries no real child's name, DOB or guardian.
+New_Active_Students_List2_vs_List1.xlsx
+*.xlsx
+*.xls
+~$*
+
 # OMR accuracy dataset: real photographs, large binaries. Kept outside the
 # repository (see docs/10-omr-calibration-testing.md).
 omr_dataset/images/

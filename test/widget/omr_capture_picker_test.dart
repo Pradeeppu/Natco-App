@@ -211,7 +211,7 @@ void main() {
           find.widgetWithText(DropdownButtonFormField<String?>, 'All schools'),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Riverside Upper Primary School').last);
+        await tester.tap(find.text('GPS NSB Nagar').last);
         await tester.pumpAndSettle();
 
         expect(find.text('Grade 6 • Section B'), findsOneWidget);
