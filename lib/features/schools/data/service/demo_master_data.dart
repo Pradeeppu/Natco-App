@@ -34,8 +34,8 @@ final DateTime _seedTimestamp = DateTime.utc(2026, 1, 1);
 List<StateEntity> demoStates() => <StateEntity>[
   StateEntity(
     stateId: DemoHierarchyIds.stateId,
-    stateName: 'Demo State',
-    stateCode: 'DS',
+    stateName: 'Telangana',
+    stateCode: 'TG',
     isActive: true,
     createdAt: _seedTimestamp,
     updatedAt: _seedTimestamp,
@@ -45,8 +45,8 @@ List<StateEntity> demoStates() => <StateEntity>[
 List<District> demoDistricts() => <District>[
   District(
     districtId: DemoHierarchyIds.districtId1,
-    districtName: 'North District',
-    districtCode: 'DS-N',
+    districtName: 'Hyderabad',
+    districtCode: 'HYD',
     stateId: DemoHierarchyIds.stateId,
     isActive: true,
     createdAt: _seedTimestamp,
@@ -54,8 +54,8 @@ List<District> demoDistricts() => <District>[
   ),
   District(
     districtId: DemoHierarchyIds.districtId2,
-    districtName: 'South District',
-    districtCode: 'DS-S',
+    districtName: 'Kothur',
+    districtCode: 'KTH',
     stateId: DemoHierarchyIds.stateId,
     isActive: true,
     createdAt: _seedTimestamp,
@@ -66,8 +66,8 @@ List<District> demoDistricts() => <District>[
 List<Cluster> demoClusters() => <Cluster>[
   Cluster(
     clusterId: DemoHierarchyIds.clusterId1,
-    clusterName: 'Riverside Cluster',
-    clusterCode: 'DS-N-1',
+    clusterName: 'Nagarjuna Sagar',
+    clusterCode: 'NGSR',
     districtId: DemoHierarchyIds.districtId1,
     stateId: DemoHierarchyIds.stateId,
     isActive: true,
@@ -149,13 +149,38 @@ School _school(
 );
 
 const List<String> _firstNames = <String>[
-  'Aarav', 'Vivaan', 'Aditya', 'Ishaan', 'Kabir', 'Arjun', 'Reyansh', 'Ayaan',
-  'Krishna', 'Ananya', 'Diya', 'Saanvi', 'Aadhya', 'Kiara', 'Myra', 'Anika',
-  'Riya', 'Sara', 'Pari', 'Zara',
+  'Aarav',
+  'Vivaan',
+  'Aditya',
+  'Ishaan',
+  'Kabir',
+  'Arjun',
+  'Reyansh',
+  'Ayaan',
+  'Krishna',
+  'Ananya',
+  'Diya',
+  'Saanvi',
+  'Aadhya',
+  'Kiara',
+  'Myra',
+  'Anika',
+  'Riya',
+  'Sara',
+  'Pari',
+  'Zara',
 ];
 
 const List<String> _lastNames = <String>[
-  'Sharma', 'Verma', 'Reddy', 'Iyer', 'Nair', 'Rao', 'Gupta', 'Das', 'Menon',
+  'Sharma',
+  'Verma',
+  'Reddy',
+  'Iyer',
+  'Nair',
+  'Rao',
+  'Gupta',
+  'Das',
+  'Menon',
   'Pillai',
 ];
 
@@ -174,7 +199,8 @@ List<Student> demoStudents() {
       final String firstName = _firstNames[sequence % _firstNames.length];
       final String lastName = _lastNames[sequence % _lastNames.length];
       final String grade = _grades[i % _grades.length];
-      final String section = _sections[(i ~/ _grades.length) % _sections.length];
+      final String section =
+          _sections[(i ~/ _grades.length) % _sections.length];
       final DateTime dateOfBirth = DateTime.utc(
         2026 - (8 + int.parse(grade)),
         1 + (sequence % 12),
