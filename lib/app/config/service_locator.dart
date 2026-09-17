@@ -83,6 +83,7 @@ import 'package:natco_app/features/sync/domain/service/sync_reconciler.dart';
 import 'package:natco_app/features/users/data/repository/user_repository_impl.dart';
 import 'package:natco_app/features/users/data/service/firestore_user_data_source.dart';
 import 'package:natco_app/features/users/data/service/in_memory_user_data_source.dart';
+import 'package:natco_app/features/users/data/service/manual_provisioning_user_data_source.dart';
 import 'package:natco_app/features/users/data/service/user_data_source.dart';
 import 'package:natco_app/features/users/domain/repository/user_repository.dart';
 
@@ -345,7 +346,9 @@ final Provider<UserDataSource> userDataSourceProvider = Provider<UserDataSource>
             .toList(growable: false),
       );
     }
-    return FirestoreUserDataSource(FirebaseFirestore.instance);
+    return ManualProvisioningUserDataSource(
+      FirestoreUserDataSource(FirebaseFirestore.instance),
+    );
   },
 );
 
