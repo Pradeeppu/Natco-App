@@ -20,20 +20,13 @@ final class SplashScreen extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
-              Icon(
-                Icons.fact_check_outlined,
-                size: 64,
-                color: theme.colorScheme.primary,
+              Image.asset(
+                'assets/logo/nsf_icon.png',
+                height: 80,
+                width: 80,
               ),
               const SizedBox(height: 20),
-              Text('NCP', style: theme.textTheme.headlineMedium),
-              const SizedBox(height: 4),
-              Text(
-                'Assessments',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
+              Text('NCP Assessments', style: theme.textTheme.headlineMedium),
               const SizedBox(height: 40),
               const SizedBox(
                 width: 32,

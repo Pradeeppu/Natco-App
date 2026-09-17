@@ -3,7 +3,7 @@
     "short_name": "NCP",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#1F4E79",
+    "background_color": "#ffffff",
     "theme_color": "#1F4E79",
     "description": "NCP Assessments — offline-first, field-ready OMR assessment data pipeline for school-based educational assessments.",
     "orientation": "portrait-primary",

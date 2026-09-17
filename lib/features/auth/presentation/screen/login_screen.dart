@@ -154,10 +154,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    Icon(
-                      Icons.fact_check_outlined,
-                      size: 56,
-                      color: theme.colorScheme.primary,
+                    Image.asset(
+                      'assets/logo/nsf_icon.png',
+                      height: 72,
+                      width: 72,
                     ),
                     const SizedBox(height: 16),
                     Text(
